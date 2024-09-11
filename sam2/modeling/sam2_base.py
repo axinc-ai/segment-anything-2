@@ -455,6 +455,10 @@ class SAM2Base(torch.nn.Module):
                 input_details[2]["index"], 
                 [1, sam_point_coords.shape[1], 2]
             )
+            prompt_encoder.resize_tensor_input(
+                input_details[3]["index"], 
+                [1, sam_point_coords.shape[1]]
+            )
             prompt_encoder.allocate_tensors()
 
             prompt_encoder.set_tensor(input_details[2]["index"], sam_point_coords)

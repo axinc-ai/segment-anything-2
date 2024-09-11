@@ -254,7 +254,7 @@ class MaskDecoder(nn.Module):
         tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
 
         # Expand per-image data in batch direction to be per-mask
-        if repeat_image:
+        if False:#repeat_image: # one_hotが生成されるのでバッチサイズ1を仮定して除去
             src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
         else:
             assert image_embeddings.shape[0] == tokens.shape[0]
@@ -267,7 +267,7 @@ class MaskDecoder(nn.Module):
         pos_src = torch.tensor((tokens.shape[0], image_pe.shape[1], image_pe.shape[2]))
         pos_src = image_pe # batch broad cast
         
-        #pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0) # one_hotが生成responseえる
+        #pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0) # one_hotが生成されるのでバッチサイズ1を仮定して除去
         
         b, c, h, w = src.shape
 

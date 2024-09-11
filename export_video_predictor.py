@@ -105,6 +105,8 @@ _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
     labels=labels,
     import_from_onnx=import_from_onnx,
     export_to_onnx=export_to_onnx,
+    import_from_tflite=import_from_tflite,
+    export_to_tflite=export_to_tflite,
     model_id=model_id
 )
 
