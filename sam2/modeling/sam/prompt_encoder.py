@@ -106,15 +106,21 @@ class PromptEncoder(nn.Module):
         #point_embedding[labels == 3] += self.point_embeddings[3].weight
 
         # こっちだと、tfliteでも動く
+
+        # Create the index mask for each label
         labels = labels.int()
-        table = torch.zeros((5, self.point_embeddings[0].weight.shape[1]))
-        table[0] = self.not_a_point_embed.weight
-        table[1] = self.point_embeddings[0].weight
-        table[2] = self.point_embeddings[1].weight
-        table[3] = self.point_embeddings[2].weight
-        table[4] = self.point_embeddings[3].weight
-        for i in range(labels.shape[0]):
-            point_embedding[i] = point_embedding[i] + table[labels[i] + 1]
+        mask_neg1 = (labels == -1).unsqueeze(-1).expand_as(point_embedding)
+        mask_0 = (labels == 0).unsqueeze(-1).expand_as(point_embedding)
+        mask_1 = (labels == 1).unsqueeze(-1).expand_as(point_embedding)
+        mask_2 = (labels == 2).unsqueeze(-1).expand_as(point_embedding)
+        mask_3 = (labels == 3).unsqueeze(-1).expand_as(point_embedding)
+
+        # Apply the weights according to the mask
+        point_embedding = torch.where(mask_neg1, self.not_a_point_embed.weight.expand_as(point_embedding), point_embedding)
+        point_embedding = torch.where(mask_0, point_embedding + self.point_embeddings[0].weight.expand_as(point_embedding), point_embedding)
+        point_embedding = torch.where(mask_1, point_embedding + self.point_embeddings[1].weight.expand_as(point_embedding), point_embedding)
+        point_embedding = torch.where(mask_2, point_embedding + self.point_embeddings[2].weight.expand_as(point_embedding), point_embedding)
+        point_embedding = torch.where(mask_3, point_embedding + self.point_embeddings[3].weight.expand_as(point_embedding), point_embedding)
 
         return point_embedding
 
