@@ -337,11 +337,23 @@ class SAM2Base(torch.nn.Module):
             # a learned `no_mask_embed` to indicate no mask input in this case).
             sam_mask_prompt = None
 
+        import numpy as np
+        print("sam_prompt_encoder input sam_point_coords ", np.sum(sam_point_coords.numpy()))
+        print("sam_prompt_encoder input sam_point_labels ", np.sum(sam_point_labels.numpy()))
+        if sam_mask_prompt is not None:
+            print("sam_prompt_encoder input mask_input_dummy ", np.sum(sam_mask_prompt.numpy()))
+
         sparse_embeddings, dense_embeddings = self.sam_prompt_encoder(
             points=(sam_point_coords, sam_point_labels),
             boxes=None,
             masks=sam_mask_prompt,
         )
+
+        import numpy as np
+        print("mask_decoder input sparse_embeddings ", np.sum(sparse_embeddings.numpy()))
+        print("mask_decoder input dense_embeddings ", np.sum(dense_embeddings.numpy()))
+        print("mask_decoder input backbone_features ", np.sum(backbone_features.numpy()))
+
         (
             low_res_multimasks,
             ious,
@@ -466,7 +478,11 @@ class SAM2Base(torch.nn.Module):
 
     def forward_image(self, img_batch: torch.Tensor):
         """Get the image feature on the input batch."""
+        import numpy as np
+        print("image_encoder input ", np.sum(img_batch.numpy()))
         backbone_out = self.image_encoder(img_batch)
+        print("image_encoder output", np.sum(backbone_out["backbone_fpn"][0].numpy()))
+        print("image_encoder output", np.sum(backbone_out["backbone_fpn"][1].numpy()))
         if self.use_high_res_features_in_sam:
             # precompute projected level 0 and level 1 features in SAM decoder
             # to avoid running it again on every SAM click
@@ -662,6 +678,12 @@ class SAM2Base(torch.nn.Module):
         memory = torch.cat(to_cat_memory, dim=0)
         memory_pos_embed = torch.cat(to_cat_memory_pos_embed, dim=0)
 
+        import numpy as np
+        print("memory_attention input current_vision_feats ", np.sum(current_vision_feats[0].numpy()))
+        print("memory_attention input current_vision_pos_embeds ", np.sum(current_vision_pos_embeds[0].numpy()))
+        print("memory_attention input memory ", np.sum(memory.numpy()))
+        print("memory_attention input memory_pos_embed ", np.sum(memory_pos_embed.numpy()))
+
         pix_feat_with_mem = self.memory_attention(
             curr=current_vision_feats,
             curr_pos=current_vision_pos_embeds,
@@ -669,6 +691,9 @@ class SAM2Base(torch.nn.Module):
             memory_pos=memory_pos_embed,
             num_obj_ptr_tokens=num_obj_ptr_tokens,
         )
+
+        print("memory_attention output pix_feat_with_mem ", np.sum(pix_feat_with_mem.numpy()))
+
         # reshape the output (HW)BC => BCHW
         pix_feat_with_mem = pix_feat_with_mem.permute(1, 2, 0).view(B, C, H, W)
         return pix_feat_with_mem

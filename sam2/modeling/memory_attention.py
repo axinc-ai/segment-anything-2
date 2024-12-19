@@ -88,7 +88,6 @@ class MemoryAttentionLayer(nn.Module):
         query_pos: Optional[Tensor] = None,
         num_k_exclude_rope: int = 0,
     ) -> torch.Tensor:
-
         # Self-Attn, Cross-Attn
         tgt = self._forward_sa(tgt, query_pos)
         tgt = self._forward_ca(tgt, memory, query_pos, pos, num_k_exclude_rope)
@@ -159,6 +158,8 @@ class MemoryAttention(nn.Module):
                 query_pos=curr_pos,
                 **kwds,
             )
+            import numpy as np
+            print("memory_attention output ", np.sum(output.numpy()))
         normed_output = self.norm(output)
 
         if self.batch_first:

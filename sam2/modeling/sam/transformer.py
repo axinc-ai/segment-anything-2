@@ -311,6 +311,9 @@ class RoPEAttention(Attention):
     def forward(
         self, q: Tensor, k: Tensor, v: Tensor, num_k_exclude_rope: int = 0
     ) -> Tensor:
+        import numpy as np
+        print("memory_attention input q k v ", np.sum(q.numpy()), np.sum(k.numpy()), np.sum(v.numpy()))
+
         # Input projections
         q = self.q_proj(q)
         k = self.k_proj(k)
@@ -339,19 +342,22 @@ class RoPEAttention(Attention):
 
         dropout_p = self.dropout_p if self.training else 0.0
         # Attention
-        try:
-            with sdp_kernel_context(dropout_p):
-                out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
-        except Exception as e:
+        #try:
+        #    with sdp_kernel_context(dropout_p):
+        #        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+        #except Exception as e:
+        if True:
             # Fall back to all kernels if the Flash attention kernel fails
-            warnings.warn(
-                f"Flash Attention kernel failed due to: {e}\nFalling back to all available "
-                f"kernels for scaled_dot_product_attention (which may have a slower speed).",
-                category=UserWarning,
-                stacklevel=2,
-            )
+            #warnings.warn(
+            #    f"Flash Attention kernel failed due to: {e}\nFalling back to all available "
+            #    f"kernels for scaled_dot_product_attention (which may have a slower speed).",
+            #    category=UserWarning,
+            #    stacklevel=2,
+            #)
             global ALLOW_ALL_KERNELS
             ALLOW_ALL_KERNELS = True
+            import numpy as np
+            print("memory_attention q k v ", np.sum(q.numpy()), np.sum(k.numpy()), np.sum(v.numpy()))
             out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
 
         out = self._recombine_heads(out)
