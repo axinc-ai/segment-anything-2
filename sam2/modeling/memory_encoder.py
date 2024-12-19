@@ -159,8 +159,9 @@ class MemoryEncoder(nn.Module):
         self,
         pix_feat: torch.Tensor,
         masks: torch.Tensor,
-        skip_mask_sigmoid: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        skip_mask_sigmoid = True # Fix for tflite
+
         ## Process masks
         # sigmoid, so that less domain shift from gt masks which are bool
         if not skip_mask_sigmoid:
@@ -178,4 +179,5 @@ class MemoryEncoder(nn.Module):
 
         pos = self.position_encoding(x).to(x.dtype)
 
-        return {"vision_features": x, "vision_pos_enc": [pos]}
+        return x, pos
+        
