@@ -366,6 +366,11 @@ class SAM2Train(SAM2Base):
         prev_sam_mask_logits=None,  # The previously predicted SAM mask logits.
         frames_to_add_correction_pt=None,
         gt_masks=None,
+        import_from_onnx=False,
+        export_to_onnx=False,
+        import_from_tflite=False,
+        export_to_tflite=False,
+        model_id=None
     ):
         if frames_to_add_correction_pt is None:
             frames_to_add_correction_pt = []
@@ -381,6 +386,11 @@ class SAM2Train(SAM2Base):
             num_frames,
             track_in_reverse,
             prev_sam_mask_logits,
+            export_to_onnx=export_to_onnx,
+            import_from_onnx=import_from_onnx,
+            export_to_tflite=export_to_tflite,
+            import_from_tflite=import_from_tflite,
+            model_id=model_id
         )
 
         (
@@ -442,6 +452,11 @@ class SAM2Train(SAM2Base):
             high_res_masks,
             object_score_logits,
             current_out,
+            export_to_onnx=export_to_onnx,
+            import_from_onnx=import_from_onnx,
+            export_to_tflite=export_to_tflite,
+            import_from_tflite=import_from_tflite,
+            model_id=model_id
         )
         return current_out
 
