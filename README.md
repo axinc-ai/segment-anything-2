@@ -93,6 +93,8 @@ You can also download it from the following.
 - https://storage.googleapis.com/ailia-models/segment-anything-2/memory_attention_hiera_t.onnx (6dim matmul, batch = N)
 - https://storage.googleapis.com/ailia-models/segment-anything-2/memory_attention_hiera_t.opt.onnx (4dim matmul, batch = 1)
 
+(The model of the Prompt Encoder was replaced on 2024/12/19 due to a problem found in the Prompt Encoder.)
+
 ### TFLITE
 
 - https://storage.googleapis.com/ailia-models-tflite/segment-anything-2/image_encoder_hiera_t.tflite
@@ -103,6 +105,8 @@ You can also download it from the following.
 - https://storage.googleapis.com/ailia-models-tflite/segment-anything-2/memory_attention_hiera_t.tflite (4dim matmul, batch = 1, num_maskmem = 1)
 
 The memory attention in tflite does not support dynamic shapes, so num_maskmem and max_obj_ptrs_in_encoder need to be fixed to 1.
+
+(The model of the Prompt Encoder was replaced on 2024/12/19 due to a problem found in the Prompt Encoder.)
 
 ## Inference Example
 
