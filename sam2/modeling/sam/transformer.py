@@ -334,6 +334,9 @@ class RoPEAttention(Attention):
     def self_attn(
         self, q: Tensor, k: Tensor, v: Tensor
     ) -> Tensor:
+        import numpy as np
+        print("memory_attention input q k v ", np.sum(q.numpy()), np.sum(k.numpy()), np.sum(v.numpy()))
+
         # Input projections
         q = self.q_proj(q)
         k = self.k_proj(k)
@@ -396,6 +399,8 @@ class RoPEAttention(Attention):
             #)
             global ALLOW_ALL_KERNELS
             ALLOW_ALL_KERNELS = True
+            import numpy as np
+            print("memory_attention q k v ", np.sum(q.numpy()), np.sum(k.numpy()), np.sum(v.numpy()))
             out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
 
         out = self._recombine_heads(out)
@@ -406,6 +411,11 @@ class RoPEAttention(Attention):
     def cross_attn(
         self, q: Tensor, k_1: Tensor, v_1: Tensor, k_2: Tensor = None, v_2: Tensor = None, m_1: Tensor = None, m_2: Tensor = None
     ) -> Tensor:
+        import numpy as np
+        k = torch.concat((k_1, k_2), dim = 1)
+        v = torch.concat((v_1, v_2), dim = 1)
+        print("memory_attention input q k v ", np.sum(q.numpy()), np.sum(k.numpy()), np.sum(v.numpy()))
+
         # Input projections
         q = self.q_proj(q)
         k_1 = self.k_proj(k_1)
@@ -484,6 +494,8 @@ class RoPEAttention(Attention):
             #)
             global ALLOW_ALL_KERNELS
             ALLOW_ALL_KERNELS = True
+            import numpy as np
+            print("memory_attention q k v ", np.sum(q.numpy()), np.sum(k.numpy()), np.sum(v.numpy()))
             out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p, attn_mask = attn_mask)
 
         out = self._recombine_heads(out)

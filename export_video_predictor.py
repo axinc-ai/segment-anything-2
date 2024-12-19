@@ -4,7 +4,7 @@
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_id', default="hiera_t", choices=["hiera_l", "hiera_b+", "hiera_s", "hiera_t"])
-parser.add_argument('--framework', default="onnx", choices=["onnx", "tflite", "torch", "ailia_tflite"])
+parser.add_argument('--framework', default="torch", choices=["onnx", "tflite", "torch", "ailia_tflite"])
 parser.add_argument('--accuracy', default="float", choices=["float", "int8"])
 parser.add_argument('--mode', default="both", choices=["both", "import", "export"])
 parser.add_argument('--image_size', default=1024, type=int, choices=[512, 1024])

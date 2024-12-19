@@ -89,7 +89,6 @@ class MemoryAttentionLayer(nn.Module):
         attention_mask_2: Optional[Tensor] = None,
         query_pos: Optional[Tensor] = None,
     ) -> torch.Tensor:
-
         # Self-Attn, Cross-Attn
         tgt = self._forward_sa(tgt, query_pos)
         tgt = self._forward_ca(tgt, memory_1, memory_2, query_pos, pos_1, pos_2, attention_mask_1, attention_mask_2)
@@ -191,6 +190,8 @@ class MemoryAttention(nn.Module):
                 attention_mask_1=attention_mask_1,
                 attention_mask_2=attention_mask_2,
             )
+            import numpy as np
+            print("memory_attention output ", np.sum(output.numpy()))
         normed_output = self.norm(output)
 
         if self.batch_first:
