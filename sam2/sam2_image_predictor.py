@@ -98,6 +98,31 @@ class SAM2ImagePredictor:
         sam_model = build_sam2_hf(model_id, **kwargs)
         return cls(sam_model, **kwargs)
 
+    def format_input_tensor(self, tensor, input_details, idx):
+        details = input_details[idx]
+        dtype = details['dtype']
+        if dtype == np.uint8 or dtype == np.int8:
+            quant_params = details['quantization_parameters']
+            input_tensor = tensor / quant_params['scales'] + quant_params['zero_points']
+            if dtype == np.int8:
+                input_tensor = input_tensor.clip(-128, 127)
+            else:
+                input_tensor = input_tensor.clip(0, 255)
+            return input_tensor.astype(dtype)
+        else:
+            return tensor
+
+    def get_output_tensor(self, interpreter, output_details, idx):
+        details = output_details[idx]
+        if details['dtype'] == np.uint8 or details['dtype'] == np.int8:
+            quant_params = details['quantization_parameters']
+            int_tensor = interpreter.get_tensor(details['index']).astype(np.int32)
+            real_tensor = int_tensor - quant_params['zero_points']
+            real_tensor = real_tensor.astype(np.float32) * quant_params['scales']
+        else:
+            real_tensor = interpreter.get_tensor(details['index'])
+        return real_tensor
+
     @torch.no_grad()
     def set_image(
         self,
@@ -192,7 +217,6 @@ class SAM2ImagePredictor:
                     _ai_edge_converter_flags=tfl_converter_flags
                 )
                 with_quantizer.export("model/image_encoder_"+model_id+"_int8.tflite")
-                edge_model = model
 
         if import_from_tflite:
             if self.image_encoder_tflite == None:
@@ -210,16 +234,29 @@ class SAM2ImagePredictor:
             input_details = self.image_encoder_tflite.get_input_details()
             output_details = self.image_encoder_tflite.get_output_details()
 
-            self.image_encoder_tflite.set_tensor(input_details[0]["index"], input_image.numpy())
-            self.image_encoder_tflite.invoke()
+            if tflite_int8:
+                self.image_encoder_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(input_image.numpy(), input_details, 0))
 
-            vision_features = self.image_encoder_tflite.get_tensor(output_details[4]["index"])
-            vision_pos_enc_0 = self.image_encoder_tflite.get_tensor(output_details[1]["index"])
-            vision_pos_enc_1 = self.image_encoder_tflite.get_tensor(output_details[5]["index"])
-            vision_pos_enc_2 = self.image_encoder_tflite.get_tensor(output_details[3]["index"])
-            backbone_fpn_0 = self.image_encoder_tflite.get_tensor(output_details[0]["index"])
-            backbone_fpn_1 = self.image_encoder_tflite.get_tensor(output_details[2]["index"])
-            backbone_fpn_2 = self.image_encoder_tflite.get_tensor(output_details[6]["index"])
+                self.image_encoder_tflite.invoke()
+
+                vision_features = self.get_output_tensor(self.image_encoder_tflite, output_details, 4)
+                vision_pos_enc_0 = self.get_output_tensor(self.image_encoder_tflite, output_details, 1)
+                vision_pos_enc_1 = self.get_output_tensor(self.image_encoder_tflite, output_details, 5)
+                vision_pos_enc_2 = self.get_output_tensor(self.image_encoder_tflite, output_details, 3)
+                backbone_fpn_0 = self.get_output_tensor(self.image_encoder_tflite, output_details, 0)
+                backbone_fpn_1 = self.get_output_tensor(self.image_encoder_tflite, output_details, 2)
+                backbone_fpn_2 = self.get_output_tensor(self.image_encoder_tflite, output_details, 6)
+            else:
+                self.image_encoder_tflite.set_tensor(input_details[0]["index"], input_image.numpy())
+                self.image_encoder_tflite.invoke()
+
+                vision_features = self.image_encoder_tflite.get_tensor(output_details[4]["index"])
+                vision_pos_enc_0 = self.image_encoder_tflite.get_tensor(output_details[1]["index"])
+                vision_pos_enc_1 = self.image_encoder_tflite.get_tensor(output_details[5]["index"])
+                vision_pos_enc_2 = self.image_encoder_tflite.get_tensor(output_details[3]["index"])
+                backbone_fpn_0 = self.image_encoder_tflite.get_tensor(output_details[0]["index"])
+                backbone_fpn_1 = self.image_encoder_tflite.get_tensor(output_details[2]["index"])
+                backbone_fpn_2 = self.image_encoder_tflite.get_tensor(output_details[6]["index"])
 
         if not import_from_onnx and not import_from_tflite:
             vision_features, vision_pos_enc_0, vision_pos_enc_1, vision_pos_enc_2, backbone_fpn_0, backbone_fpn_1, backbone_fpn_2 = self.model.forward_image(input_image)

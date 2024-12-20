@@ -39,6 +39,10 @@ class PositionEmbeddingSine(nn.Module):
 
         self.cache = {}
 
+        # 事前計算する
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32)
+        self.dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+
     def _encode_xy(self, x, y):
         # The positions are expected to be normalized
         assert len(x) == len(y) and x.ndim == y.ndim == 1
@@ -96,8 +100,12 @@ class PositionEmbeddingSine(nn.Module):
             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
-        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
-        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+        # 通常は動的計算だが、Int8への量子化に失敗するので、事前計算にする
+        if True:
+            dim_t = self.dim_t
+        else:
+            dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32)
+            dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
 
         pos_x = x_embed[:, :, :, None] / dim_t
         pos_y = y_embed[:, :, :, None] / dim_t
