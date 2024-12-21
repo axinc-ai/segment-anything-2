@@ -749,25 +749,54 @@ class SAM2ImagePredictor:
                 edge_model.export("model/mask_decoder_"+model_id+".tflite")
 
             if tflite_int8:
-                from ai_edge_torch.quantize import pt2e_quantizer
-                from ai_edge_torch.quantize import quant_config
-                from torch.ao.quantization import quantize_pt2e
+                if False:
+                    # torch quantization
+                    from ai_edge_torch.quantize import pt2e_quantizer
+                    from ai_edge_torch.quantize import quant_config
+                    from torch.ao.quantization import quantize_pt2e
 
-                quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=False) # Trueだとエラー
-                )
-                model = torch._export.capture_pre_autograd_graph(self.model.sam_mask_decoder, sample_inputs)
-                model = quantize_pt2e.prepare_pt2e(model, quantizer)
-                model(self._features["image_embed"][img_idx].unsqueeze(0), dense_pe, sparse_embeddings, dense_embeddings, batched_mode, high_res_features[0], high_res_features[1]) # calibration
-                model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
+                    quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
+                        pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=False) # Trueだとエラー
+                    )
+                    model = torch._export.capture_pre_autograd_graph(self.model.sam_mask_decoder, sample_inputs)
+                    model = quantize_pt2e.prepare_pt2e(model, quantizer)
+                    model(self._features["image_embed"][img_idx].unsqueeze(0), dense_pe, sparse_embeddings, dense_embeddings, batched_mode, high_res_features[0], high_res_features[1]) # calibration
+                    model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
-                with_quantizer = ai_edge_torch.convert(
-                    model,
-                    sample_inputs,
-                    quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
-                )
-                with_quantizer.export("model/mask_decoder_"+model_id+".int8.tflite")
+                    with_quantizer = ai_edge_torch.convert(
+                        model,
+                        sample_inputs,
+                        quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
+                    )
+                    with_quantizer.export("model/mask_decoder_"+model_id+".int8.tflite")
+                else:
+                    # tensorflow quantization
+                    def representative_dataset():
+                        for _ in range(1):
+                            data3 = self._features["image_embed"][img_idx].unsqueeze(0).numpy().astype(np.float32)
+                            data6 = dense_pe.numpy().astype(np.float32)
+                            data1 = sparse_embeddings.numpy().astype(np.float32)
+                            data2 = dense_embeddings.numpy().astype(np.float32)
+                            data5 = np.zeros((1), dtype=bool)
+                            data5[0] = batched_mode
+                            data0 = high_res_features[0].numpy().astype(np.float32)
+                            data4 = high_res_features[1].numpy().astype(np.float32)
+                            yield [data0, data1, data2, data3, data4, data5, data6]
+                    
+                    tfl_converter_flags = {
+                        'optimizations': [tf.lite.Optimize.DEFAULT],
+                        'representative_dataset': representative_dataset,
+                        'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
+                        'inference_input_type': tf.int8,
+                        'inference_output_type': tf.int8,
+                    }
 
+                    tfl_fullint_model = ai_edge_torch.convert(
+                        self.model.sam_mask_decoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                    )
+
+                    tfl_fullint_model.export("model/mask_decoder_"+model_id+".int8.tflite")
+                
         if import_from_tflite:
             batched_mode_np = np.zeros((1), dtype=bool)
             if batched_mode:
