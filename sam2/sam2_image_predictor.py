@@ -721,18 +721,18 @@ class SAM2ImagePredictor:
             self.model.sam_mask_decoder.forward = self.model.sam_mask_decoder.forward_masks
             sample_inputs = (self._features["image_embed"][img_idx].unsqueeze(0), dense_pe, sparse_embeddings, dense_embeddings, batched_mode, high_res_features[0], high_res_features[1])
 
-            if True:#not tflite_int8:
+            if not tflite_int8:
                 import ai_edge_torch
                 edge_model = ai_edge_torch.convert(self.model.sam_mask_decoder, sample_inputs)
                 edge_model.export("model/mask_decoder_"+model_id+".tflite")
 
-            if False:#tflite_int8:
+            if tflite_int8:
                 from ai_edge_torch.quantize import pt2e_quantizer
                 from ai_edge_torch.quantize import quant_config
                 from torch.ao.quantization import quantize_pt2e
 
                 quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                    pt2e_quantizer.get_symmetric_quantization_config()
+                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
                 )
                 model = torch._export.capture_pre_autograd_graph(self.model.sam_mask_decoder, sample_inputs)
                 model = quantize_pt2e.prepare_pt2e(model, quantizer)
@@ -744,7 +744,7 @@ class SAM2ImagePredictor:
                     sample_inputs,
                     quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                 )
-                with_quantizer.export("model/mask_decoder_"+model_id+"_int8.tflite")
+                with_quantizer.export("model/mask_decoder_"+model_id+".int8.tflite")
 
                 edge_model = model
 
@@ -754,18 +754,21 @@ class SAM2ImagePredictor:
                 batched_mode_np[0] = True
 
             if self.mask_decoder_tflite == None:
+                int8_id = ""
+                if tflite_int8:
+                    int8_id = ".int8"
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
-                    self.mask_decoder_tflite  = ailia_tflite.Interpreter(model_path="model/mask_decoder_"+model_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
+                    self.mask_decoder_tflite  = ailia_tflite.Interpreter(model_path="model/mask_decoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
                 else:
                     import tensorflow as tf
-                    self.mask_decoder_tflite  = tf.lite.Interpreter(model_path="model/mask_decoder_"+model_id+".tflite")
+                    self.mask_decoder_tflite  = tf.lite.Interpreter(model_path="model/mask_decoder_"+model_id+int8_id+".tflite")
                 self.mask_decoder_tflite.allocate_tensors()
                 input_details = self.mask_decoder_tflite.get_input_details()
-                self.mask_decoder_tflite.resize_tensor_input(
-                    input_details[1]["index"], 
-                    [1, sparse_embeddings.shape[1], 256]
-                )
+                #self.mask_decoder_tflite.resize_tensor_input(
+                #    input_details[1]["index"], 
+                #    [1, sparse_embeddings.shape[1], 256]
+                #)
                 self.mask_decoder_tflite.allocate_tensors()
 
             input_details = self.mask_decoder_tflite.get_input_details()
@@ -773,19 +776,34 @@ class SAM2ImagePredictor:
 
             batched_mode = False
 
-            self.mask_decoder_tflite.set_tensor(input_details[3]["index"], self._features["image_embed"][img_idx].unsqueeze(0).numpy())
-            self.mask_decoder_tflite.set_tensor(input_details[6]["index"], dense_pe)
-            self.mask_decoder_tflite.set_tensor(input_details[1]["index"], sparse_embeddings)
-            self.mask_decoder_tflite.set_tensor(input_details[2]["index"], dense_embeddings)
-            self.mask_decoder_tflite.set_tensor(input_details[5]["index"], batched_mode)
-            self.mask_decoder_tflite.set_tensor(input_details[0]["index"], high_res_features[0].numpy())
-            self.mask_decoder_tflite.set_tensor(input_details[4]["index"], high_res_features[1].numpy())
-            self.mask_decoder_tflite.invoke()
+            if tflite_int8:
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(self._features["image_embed"][img_idx].unsqueeze(0).numpy(), input_details, 3))
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(dense_pe, input_details, 6))
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(sparse_embeddings, input_details, 1))
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(dense_embeddings, input_details, 2))
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(batched_mode, input_details, 5))
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(high_res_features[0].numpy(), input_details, 0))
+                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(high_res_features[1].numpy(), input_details, 4))
+                self.mask_decoder_tflite.invoke()
 
-            masks = self.mask_decoder_tflite.get_tensor(output_details[2]["index"])
-            iou_pred = self.mask_decoder_tflite.get_tensor(output_details[0]["index"])
-            sam_tokens_out = self.mask_decoder_tflite.get_tensor(output_details[3]["index"])
-            object_score_logits = self.mask_decoder_tflite.get_tensor(output_details[1]["index"])
+                masks = self.get_output_tensor(self.mask_decoder_tflite, output_details, 2)
+                iou_pred = self.get_output_tensor(self.mask_decoder_tflite, output_details, 0)
+                sam_tokens_out = self.get_output_tensor(self.mask_decoder_tflite, output_details, 3)
+                object_score_logits = self.get_output_tensor(self.mask_decoder_tflite, output_details, 1)
+            else:
+                self.mask_decoder_tflite.set_tensor(input_details[3]["index"], self._features["image_embed"][img_idx].unsqueeze(0).numpy())
+                self.mask_decoder_tflite.set_tensor(input_details[6]["index"], dense_pe)
+                self.mask_decoder_tflite.set_tensor(input_details[1]["index"], sparse_embeddings)
+                self.mask_decoder_tflite.set_tensor(input_details[2]["index"], dense_embeddings)
+                self.mask_decoder_tflite.set_tensor(input_details[5]["index"], batched_mode)
+                self.mask_decoder_tflite.set_tensor(input_details[0]["index"], high_res_features[0].numpy())
+                self.mask_decoder_tflite.set_tensor(input_details[4]["index"], high_res_features[1].numpy())
+                self.mask_decoder_tflite.invoke()
+
+                masks = self.mask_decoder_tflite.get_tensor(output_details[2]["index"])
+                iou_pred = self.mask_decoder_tflite.get_tensor(output_details[0]["index"])
+                sam_tokens_out = self.mask_decoder_tflite.get_tensor(output_details[3]["index"])
+                object_score_logits = self.mask_decoder_tflite.get_tensor(output_details[1]["index"])
 
             masks = torch.Tensor(masks)
             iou_pred = torch.Tensor(iou_pred)
