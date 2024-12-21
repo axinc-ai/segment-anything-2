@@ -732,7 +732,7 @@ class SAM2ImagePredictor:
                 from torch.ao.quantization import quantize_pt2e
 
                 quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
+                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=False) # Trueだとエラー
                 )
                 model = torch._export.capture_pre_autograd_graph(self.model.sam_mask_decoder, sample_inputs)
                 model = quantize_pt2e.prepare_pt2e(model, quantizer)
