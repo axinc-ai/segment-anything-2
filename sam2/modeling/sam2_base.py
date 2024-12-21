@@ -15,6 +15,8 @@ from sam2.modeling.sam.prompt_encoder import PromptEncoder
 from sam2.modeling.sam.transformer import TwoWayTransformer
 from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
 
+import numpy as np
+
 # a large negative value as a placeholder score for missing objects
 NO_OBJ_SCORE = -1024.0
 
@@ -839,6 +841,32 @@ class SAM2Base(torch.nn.Module):
         return tpos
 
 
+    def format_input_tensor(self, tensor, input_details, idx):
+        details = input_details[idx]
+        dtype = details['dtype']
+        if dtype == np.uint8 or dtype == np.int8:
+            quant_params = details['quantization_parameters']
+            input_tensor = tensor / quant_params['scales'] + quant_params['zero_points']
+            if dtype == np.int8:
+                input_tensor = input_tensor.clip(-128, 127)
+            else:
+                input_tensor = input_tensor.clip(0, 255)
+            return input_tensor.astype(dtype)
+        else:
+            return tensor
+
+    def get_output_tensor(self, interpreter, output_details, idx):
+        details = output_details[idx]
+        if details['dtype'] == np.uint8 or details['dtype'] == np.int8:
+            quant_params = details['quantization_parameters']
+            int_tensor = interpreter.get_tensor(details['index']).astype(np.int32)
+            real_tensor = int_tensor - quant_params['zero_points']
+            real_tensor = real_tensor.astype(np.float32) * quant_params['scales']
+        else:
+            real_tensor = interpreter.get_tensor(details['index'])
+        return real_tensor
+
+
     def _prepare_memory_conditioned_features(
         self,
         frame_idx,
@@ -853,6 +881,7 @@ class SAM2Base(torch.nn.Module):
         import_from_onnx=False,
         export_to_tflite=False,
         import_from_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """Fuse the current frame's visual feature map with previous memory."""
@@ -1113,9 +1142,30 @@ class SAM2Base(torch.nn.Module):
             import tensorflow as tf
             sample_inputs = (current_vision_feats[0], memory_1, memory_2, current_vision_pos_embeds[0], memory_pos_embed_1, memory_pos_embed_2, attention_mask_1, attention_mask_2)
             tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
-            if True:#self.num_maskmem == 1 and self.max_obj_ptrs_in_encoder == 1:
+            if not tflite_int8:
                 edge_model = ai_edge_torch.convert(self.memory_attention, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
+                edge_model.export("model/memory_attention_"+model_id+".tflite")
             else:
+                from ai_edge_torch.quantize import pt2e_quantizer
+                from ai_edge_torch.quantize import quant_config
+                from torch.ao.quantization import quantize_pt2e
+
+                quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
+                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
+                )
+                model = torch._export.capture_pre_autograd_graph(self.memory_attention, sample_inputs)
+                model = quantize_pt2e.prepare_pt2e(model, quantizer)
+                model(current_vision_feats[0], memory_1, memory_2, current_vision_pos_embeds[0], memory_pos_embed_1, memory_pos_embed_2, attention_mask_1, attention_mask_2)
+                model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
+
+                with_quantizer = ai_edge_torch.convert(
+                    model,
+                    sample_inputs,
+                    quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
+                )
+                with_quantizer.export("model/memory_attention_"+model_id+".int8.tflite")
+            
+            if False: # Dynamic
                 n_1 = torch.export.Dim("n_1", min=1, max=256)
                 n_4096 = n_1 * 4096
                 n_2 = torch.export.Dim("n_2", min=1, max=256)
@@ -1131,18 +1181,22 @@ class SAM2Base(torch.nn.Module):
                     'attention_mask_2': {0: n_4}
                 }
                 edge_model = ai_edge_torch.convert(self.memory_attention, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags, dynamic_shapes=dynamic_shapes)
-            edge_model.export("model/memory_attention_"+model_id+".tflite")
+                edge_model.export("model/memory_attention_"+model_id+".tflite")
 
         if import_from_tflite:
             if self.debug:
                 print("begin memory attention tflite")
             if self.memory_attention_tflite == None:
+                int8_id = ""
+                if tflite_int8:
+                    int8_id = ".int8"
+
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
-                    self.memory_attention_tflite = ailia_tflite.Interpreter(model_path="model/memory_attention_"+model_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
+                    self.memory_attention_tflite = ailia_tflite.Interpreter(model_path="model/memory_attention_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
                 else:
                     import tensorflow as tf
-                    self.memory_attention_tflite = tf.lite.Interpreter(model_path="model/memory_attention_"+model_id+".tflite")
+                    self.memory_attention_tflite = tf.lite.Interpreter(model_path="model/memory_attention_"+model_id+int8_id+".tflite")
                 self.memory_attention_tflite.allocate_tensors()
                 input_details = self.memory_attention_tflite.get_input_details()
                 #self.memory_attention_tflite.resize_tensor_input(
@@ -1166,18 +1220,32 @@ class SAM2Base(torch.nn.Module):
             input_details = self.memory_attention_tflite.get_input_details()
             output_details = self.memory_attention_tflite.get_output_details()
 
-            self.memory_attention_tflite.set_tensor(input_details[3]["index"], current_vision_feats[0].numpy())
-            self.memory_attention_tflite.set_tensor(input_details[6]["index"], memory_1.numpy())
-            self.memory_attention_tflite.set_tensor(input_details[1]["index"], memory_2.numpy())
-            self.memory_attention_tflite.set_tensor(input_details[2]["index"], current_vision_pos_embeds[0].numpy())
-            self.memory_attention_tflite.set_tensor(input_details[5]["index"], memory_pos_embed_1.numpy())
-            self.memory_attention_tflite.set_tensor(input_details[0]["index"], memory_pos_embed_2.numpy())
-            self.memory_attention_tflite.set_tensor(input_details[4]["index"], attention_mask_1.numpy())
-            self.memory_attention_tflite.set_tensor(input_details[7]["index"], attention_mask_2.numpy())
+            if tflite_int8:
+                self.memory_attention_tflite.set_tensor(input_details[3]["index"], self.format_input_tensor(current_vision_feats[0].numpy(), input_details, 3))
+                self.memory_attention_tflite.set_tensor(input_details[6]["index"], self.format_input_tensor(memory_1.numpy(), input_details, 6))
+                self.memory_attention_tflite.set_tensor(input_details[1]["index"], self.format_input_tensor(memory_2.numpy(), input_details, 1))
+                self.memory_attention_tflite.set_tensor(input_details[2]["index"], self.format_input_tensor(current_vision_pos_embeds[0].numpy(), input_details, 2))
+                self.memory_attention_tflite.set_tensor(input_details[5]["index"], self.format_input_tensor(memory_pos_embed_1.numpy(), input_details, 5))
+                self.memory_attention_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(memory_pos_embed_2.numpy(), input_details, 0))
+                self.memory_attention_tflite.set_tensor(input_details[4]["index"], self.format_input_tensor(attention_mask_1.numpy(), input_details, 4))
+                self.memory_attention_tflite.set_tensor(input_details[7]["index"], self.format_input_tensor(attention_mask_2.numpy(), input_details, 7))
 
-            self.memory_attention_tflite.invoke()
+                self.memory_attention_tflite.invoke()
 
-            pix_feat_with_mem = self.memory_attention_tflite.get_tensor(output_details[0]["index"])
+                pix_feat_with_mem = self.get_output_tensor(self.memory_attention_tflite, output_details, 0)
+            else:
+                self.memory_attention_tflite.set_tensor(input_details[3]["index"], current_vision_feats[0].numpy())
+                self.memory_attention_tflite.set_tensor(input_details[6]["index"], memory_1.numpy())
+                self.memory_attention_tflite.set_tensor(input_details[1]["index"], memory_2.numpy())
+                self.memory_attention_tflite.set_tensor(input_details[2]["index"], current_vision_pos_embeds[0].numpy())
+                self.memory_attention_tflite.set_tensor(input_details[5]["index"], memory_pos_embed_1.numpy())
+                self.memory_attention_tflite.set_tensor(input_details[0]["index"], memory_pos_embed_2.numpy())
+                self.memory_attention_tflite.set_tensor(input_details[4]["index"], attention_mask_1.numpy())
+                self.memory_attention_tflite.set_tensor(input_details[7]["index"], attention_mask_2.numpy())
+
+                self.memory_attention_tflite.invoke()
+
+                pix_feat_with_mem = self.memory_attention_tflite.get_tensor(output_details[0]["index"])
             pix_feat_with_mem = torch.Tensor(pix_feat_with_mem)
 
         if not import_from_onnx and not import_from_tflite:
@@ -1331,6 +1399,7 @@ class SAM2Base(torch.nn.Module):
         export_to_onnx=False,
         import_from_tflite=False,
         export_to_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         current_out = {"point_inputs": point_inputs, "mask_inputs": mask_inputs}
@@ -1365,6 +1434,7 @@ class SAM2Base(torch.nn.Module):
                 import_from_onnx=import_from_onnx,
                 export_to_tflite=export_to_tflite,
                 import_from_tflite=import_from_tflite,
+                tflite_int8=tflite_int8,
                 model_id=model_id
             )
             # apply SAM-style segmentation head
@@ -1450,6 +1520,7 @@ class SAM2Base(torch.nn.Module):
         import_from_onnx=False,
         export_to_tflite=False,
         import_from_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         current_out, sam_outputs, _, _ = self._track_step(
@@ -1468,6 +1539,7 @@ class SAM2Base(torch.nn.Module):
             import_from_onnx=import_from_onnx,
             export_to_tflite=export_to_tflite,
             import_from_tflite=import_from_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
 

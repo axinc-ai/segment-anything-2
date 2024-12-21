@@ -26,6 +26,7 @@ export_to_onnx = args.framework=="onnx" and (args.mode=="export" or args.mode=="
 import_from_onnx = args.framework=="onnx" and (args.mode=="import" or args.mode=="both")
 export_to_tflite = args.framework=="tflite" and (args.mode=="export" or args.mode=="both")
 import_from_tflite = (args.framework=="tflite" or args.framework=="ailia_tflite") and (args.mode=="import" or args.mode=="both")
+tflite_int8 = (args.accuracy == "int8")
 
 if args.framework=="ailia_tflite" and import_from_tflite:
     import_from_tflite = "ailia_tflite"
@@ -123,6 +124,7 @@ _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
     export_to_onnx=export_to_onnx,
     import_from_tflite=import_from_tflite,
     export_to_tflite=export_to_tflite,
+    tflite_int8=tflite_int8,
     model_id=model_id
 )
 
@@ -137,7 +139,7 @@ plt.savefig(f'output/video_'+model_id+'.png')
 
 # run propagation throughout the video and collect the results in a dict
 video_segments = {}  # video_segments contains the per-frame segmentation results
-for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite, model_id=model_id):
+for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite, tflite_int8=tflite_int8, model_id=model_id):
     video_segments[out_frame_idx] = {
         out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
         for i, out_obj_id in enumerate(out_obj_ids)

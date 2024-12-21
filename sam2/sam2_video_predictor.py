@@ -188,6 +188,7 @@ class SAM2VideoPredictor(SAM2Base):
         export_to_onnx=False,
         import_from_tflite=False,
         export_to_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """Add new points to a frame."""
@@ -308,6 +309,7 @@ class SAM2VideoPredictor(SAM2Base):
             export_to_onnx=export_to_onnx,
             import_from_tflite=import_from_tflite,
             export_to_tflite=export_to_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
         # Add the output to the output dict (to be used as future memory)
@@ -323,6 +325,7 @@ class SAM2VideoPredictor(SAM2Base):
             consolidate_at_video_res=True,
             import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx,
             import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
         _, video_res_masks = self._get_orig_video_res_output(
@@ -345,6 +348,7 @@ class SAM2VideoPredictor(SAM2Base):
         export_to_onnx=False,
         import_from_tflite=False,
         export_to_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """Add new mask to a frame."""
@@ -409,6 +413,7 @@ class SAM2VideoPredictor(SAM2Base):
             export_to_onnx=export_to_onnx,
             import_from_tflite=import_from_tflite,
             export_to_tflite=export_to_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
         # Add the output to the output dict (to be used as future memory)
@@ -464,6 +469,7 @@ class SAM2VideoPredictor(SAM2Base):
         export_to_onnx=False,
         import_from_tflite=False,
         export_to_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """
@@ -539,7 +545,7 @@ class SAM2VideoPredictor(SAM2Base):
                 if run_mem_encoder:
                     if empty_mask_ptr is None:
                         empty_mask_ptr = self._get_empty_mask_ptr(
-                            inference_state, frame_idx, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, model_id=model_id
+                            inference_state, frame_idx, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, tflite_int8=tflite_int8, model_id=model_id
                         )
                     # fill object pointer with a dummy pointer (based on an empty mask)
                     consolidated_out["obj_ptr"][obj_idx : obj_idx + 1] = empty_mask_ptr
@@ -593,7 +599,7 @@ class SAM2VideoPredictor(SAM2Base):
 
         return consolidated_out
 
-    def _get_empty_mask_ptr(self, inference_state, frame_idx, import_from_onnx, export_to_onnx, import_from_tflite, export_to_tflite, model_id):
+    def _get_empty_mask_ptr(self, inference_state, frame_idx, import_from_onnx, export_to_onnx, import_from_tflite, export_to_tflite, tflite_int8, model_id):
         """Get a dummy object pointer based on an empty mask on the current frame."""
         # A dummy (empty) mask with a single object
         batch_size = 1
@@ -630,12 +636,13 @@ class SAM2VideoPredictor(SAM2Base):
             export_to_onnx=export_to_onnx,
             import_from_tflite=import_from_tflite,
             export_to_tflite=export_to_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
         return current_out["obj_ptr"]
 
     @torch.inference_mode()
-    def propagate_in_video_preflight(self, inference_state, import_from_onnx=False, export_to_onnx=False, import_from_tflite=False, export_to_tflite=False, model_id=None):
+    def propagate_in_video_preflight(self, inference_state, import_from_onnx=False, export_to_onnx=False, import_from_tflite=False, export_to_tflite=False, tflite_int8=False, model_id=None):
         """Prepare inference_state and consolidate temporary outputs before tracking."""
         # Tracking has started and we don't allow adding new objects until session is reset.
         inference_state["tracking_has_started"] = True
@@ -662,7 +669,7 @@ class SAM2VideoPredictor(SAM2Base):
             # consolidate the temporary output across all objects on this frame
             for frame_idx in temp_frame_inds:
                 consolidated_out = self._consolidate_temp_output_across_obj(
-                    inference_state, frame_idx, is_cond=is_cond, run_mem_encoder=True, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite, model_id=model_id
+                    inference_state, frame_idx, is_cond=is_cond, run_mem_encoder=True, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite, tflite_int8=tflite_int8, model_id=model_id
                 )
                 # merge them into "output_dict" and also create per-object slices
                 output_dict[storage_key][frame_idx] = consolidated_out
@@ -715,10 +722,11 @@ class SAM2VideoPredictor(SAM2Base):
         export_to_onnx=False,
         import_from_tflite=False,
         export_to_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """Propagate the input points across frames to track in the entire video."""
-        self.propagate_in_video_preflight(inference_state, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite, model_id=model_id)
+        self.propagate_in_video_preflight(inference_state, import_from_onnx=import_from_onnx, export_to_onnx=export_to_onnx, import_from_tflite=import_from_tflite, export_to_tflite=export_to_tflite, tflite_int8=tflite_int8, model_id=model_id)
 
         output_dict = inference_state["output_dict"]
         consolidated_frame_inds = inference_state["consolidated_frame_inds"]
@@ -782,6 +790,7 @@ class SAM2VideoPredictor(SAM2Base):
                     export_to_onnx=export_to_onnx,
                     import_from_tflite=import_from_tflite,
                     export_to_tflite=export_to_tflite,
+                    tflite_int8=tflite_int8,
                     model_id=model_id
                 )
                 output_dict[storage_key][frame_idx] = current_out
@@ -830,7 +839,13 @@ class SAM2VideoPredictor(SAM2Base):
 
     @torch.inference_mode()
     def clear_all_prompts_in_frame(
-        self, inference_state, frame_idx, obj_id, need_output=True
+        self, inference_state, frame_idx, obj_id, need_output=True,
+        import_from_onnx=False,
+        export_to_onnx=False,
+        import_from_tflite=False,
+        export_to_tflite=False,
+        tflite_int8=False,
+        model_id=None
     ):
         """Remove all input points or mask in a specific frame for a given object."""
         obj_idx = self._obj_id_to_idx(inference_state, obj_id)
@@ -893,6 +908,12 @@ class SAM2VideoPredictor(SAM2Base):
             is_cond=is_cond,
             run_mem_encoder=False,
             consolidate_at_video_res=True,
+            import_from_onnx=import_from_onnx,
+            export_to_onnx=export_to_onnx,
+            import_from_tflite=import_from_tflite,
+            export_to_tflite=export_to_tflite,
+            tflite_int8=tflite_int8,
+            model_id=model_id
         )
         _, video_res_masks = self._get_orig_video_res_output(
             inference_state, consolidated_out["pred_masks_video_res"]
@@ -1022,6 +1043,7 @@ class SAM2VideoPredictor(SAM2Base):
         export_to_onnx=False,
         import_from_tflite=False,
         export_to_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """Run tracking on a single frame based on current inputs and previous memory."""
@@ -1053,6 +1075,7 @@ class SAM2VideoPredictor(SAM2Base):
             export_to_onnx=export_to_onnx,
             import_from_tflite=import_from_tflite,
             export_to_tflite=export_to_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
 
@@ -1152,7 +1175,14 @@ class SAM2VideoPredictor(SAM2Base):
         return expanded_maskmem_pos_enc
 
     @torch.inference_mode()
-    def remove_object(self, inference_state, obj_id, strict=False, need_output=True):
+    def remove_object(self, inference_state, obj_id, strict=False, need_output=True,
+        import_from_onnx=False,
+        export_to_onnx=False,
+        import_from_tflite=False,
+        export_to_tflite=False,
+        tflite_int8=False,
+        model_id=None
+    ):
         """
         Remove an object id from the tracking state. If strict is True, we check whether
         the object id actually exists and raise an error if it doesn't exist.
@@ -1257,6 +1287,12 @@ class SAM2VideoPredictor(SAM2Base):
                     is_cond=is_cond,
                     run_mem_encoder=False,
                     consolidate_at_video_res=True,
+                    import_from_onnx=import_from_onnx,
+                    export_to_onnx=export_to_onnx,
+                    import_from_tflite=import_from_tflite,
+                    export_to_tflite=export_to_tflite,
+                    tflite_int8=tflite_int8,
+                    model_id=model_id
                 )
                 _, video_res_masks = self._get_orig_video_res_output(
                     inference_state, consolidated_out["pred_masks_video_res"]

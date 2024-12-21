@@ -746,8 +746,6 @@ class SAM2ImagePredictor:
                 )
                 with_quantizer.export("model/mask_decoder_"+model_id+".int8.tflite")
 
-                edge_model = model
-
         if import_from_tflite:
             batched_mode_np = np.zeros((1), dtype=bool)
             if batched_mode:
