@@ -626,64 +626,106 @@ class SAM2ImagePredictor:
             dense_embeddings = torch.Tensor(dense_embeddings)
             dense_pe = torch.Tensor(dense_pe)
 
+        tflite_int8_prompt_encoder = tflite_int8
+        tflite_int8_prompt_encoder = False # 精度不足
+
         if export_to_tflite:
             import ai_edge_torch
+            import tensorflow as tf
             sample_inputs = (concat_points[0], concat_points[1], mask_input_dummy, masks_enable)
 
-            if True:#not tflite_int8:
+            if not tflite_int8_prompt_encoder:
                 edge_model = ai_edge_torch.convert(self.model.sam_prompt_encoder, sample_inputs)
                 edge_model.export("model/prompt_encoder_"+model_id+".tflite")
 
-            if False:#tflite_int8: # labelがint64で量子化できない
-                from ai_edge_torch.quantize import pt2e_quantizer
-                from ai_edge_torch.quantize import quant_config
-                from torch.ao.quantization import quantize_pt2e
+            if tflite_int8_prompt_encoder:
+                if False:
+                    # torch quantization
+                    # labelがint64で量子化できない
+                    from ai_edge_torch.quantize import pt2e_quantizer
+                    from ai_edge_torch.quantize import quant_config
+                    from torch.ao.quantization import quantize_pt2e
 
-                quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                    pt2e_quantizer.get_symmetric_quantization_config()
-                )
-                model = torch._export.capture_pre_autograd_graph(self.model.sam_prompt_encoder, sample_inputs)
-                model = quantize_pt2e.prepare_pt2e(model, quantizer)
-                model(concat_points[0], concat_points[1]) # calibration
-                model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
+                    quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
+                        pt2e_quantizer.get_symmetric_quantization_config()
+                    )
+                    model = torch._export.capture_pre_autograd_graph(self.model.sam_prompt_encoder, sample_inputs)
+                    model = quantize_pt2e.prepare_pt2e(model, quantizer)
+                    model(concat_points[0], concat_points[1], mask_input_dummy, masks_enable) # calibration
+                    model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
-                with_quantizer = ai_edge_torch.convert(
-                    model,
-                    sample_inputs,
-                    quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
-                )
-                with_quantizer.export("model/prompt_encoder_"+model_id+"_int8.tflite")
+                    with_quantizer = ai_edge_torch.convert(
+                        model,
+                        sample_inputs,
+                        quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
+                    )
+                    with_quantizer.export("model/prompt_encoder_"+model_id+".int8.tflite")
+                else:
+                    # tensorflow quantization
+                    def representative_dataset():
+                        for _ in range(1):
+                            data2 = concat_points[0].numpy()
+                            data3 = concat_points[1].numpy()
+                            data0 = mask_input_dummy.numpy()
+                            data1 = masks_enable.numpy()
+                            yield [data0, data1, data2, data3]
+                    
+                    tfl_converter_flags = {
+                        'optimizations': [tf.lite.Optimize.DEFAULT],
+                        'representative_dataset': representative_dataset,
+                        'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
+                        'inference_input_type': tf.int8,
+                        'inference_output_type': tf.int8,
+                    }
 
-                edge_model = model
+                    tfl_fullint_model = ai_edge_torch.convert(
+                        self.model.sam_prompt_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                    )
+
+                    tfl_fullint_model.export("model/prompt_encoder_"+model_id+".int8.tflite")
 
         if import_from_tflite:
             if self.prompt_encoder_tflite == None:
+                int8_id = ""
+                if tflite_int8_prompt_encoder:
+                    int8_id = ".int8"
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
-                    self.prompt_encoder_tflite = ailia_tflite.Interpreter(model_path="model/prompt_encoder_"+model_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
+                    self.prompt_encoder_tflite = ailia_tflite.Interpreter(model_path="model/prompt_encoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
                 else:
                     import tensorflow as tf
-                    self.prompt_encoder_tflite = tf.lite.Interpreter(model_path="model/prompt_encoder_"+model_id+".tflite")
+                    self.prompt_encoder_tflite = tf.lite.Interpreter(model_path="model/prompt_encoder_"+model_id+int8_id+".tflite")
                 self.prompt_encoder_tflite.allocate_tensors()
                 input_details = self.prompt_encoder_tflite.get_input_details()
-                self.prompt_encoder_tflite.resize_tensor_input(
-                    input_details[2]["index"], 
-                    [1, concat_points[0].shape[1], 2]
-                )
+                #self.prompt_encoder_tflite.resize_tensor_input(
+                #    input_details[2]["index"], 
+                #    [1, concat_points[0].shape[1], 2]
+                #)
                 self.prompt_encoder_tflite.allocate_tensors()
 
             input_details = self.prompt_encoder_tflite.get_input_details()
             output_details = self.prompt_encoder_tflite.get_output_details()
 
-            self.prompt_encoder_tflite.set_tensor(input_details[2]["index"], concat_points[0])
-            self.prompt_encoder_tflite.set_tensor(input_details[3]["index"], concat_points[1])
-            self.prompt_encoder_tflite.set_tensor(input_details[0]["index"], mask_input_dummy)
-            self.prompt_encoder_tflite.set_tensor(input_details[1]["index"], masks_enable)
-            self.prompt_encoder_tflite.invoke()
+            if tflite_int8_prompt_encoder:
+                self.prompt_encoder_tflite.set_tensor(input_details[2]["index"], self.format_input_tensor(concat_points[0].numpy(), input_details, 2))
+                self.prompt_encoder_tflite.set_tensor(input_details[3]["index"], self.format_input_tensor(concat_points[1].numpy(), input_details, 3))
+                self.prompt_encoder_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(mask_input_dummy.numpy(), input_details, 0))
+                self.prompt_encoder_tflite.set_tensor(input_details[1]["index"], self.format_input_tensor(masks_enable.numpy(), input_details, 1))
+                self.prompt_encoder_tflite.invoke()
 
-            sparse_embeddings = self.prompt_encoder_tflite.get_tensor(output_details[1]["index"])
-            dense_embeddings = self.prompt_encoder_tflite.get_tensor(output_details[0]["index"])
-            dense_pe = self.prompt_encoder_tflite.get_tensor(output_details[2]["index"])
+                sparse_embeddings = self.get_output_tensor(self.prompt_encoder_tflite, output_details, 1)
+                dense_embeddings = self.get_output_tensor(self.prompt_encoder_tflite, output_details, 0)
+                dense_pe = self.get_output_tensor(self.prompt_encoder_tflite, output_details, 2)
+            else:
+                self.prompt_encoder_tflite.set_tensor(input_details[2]["index"], concat_points[0])
+                self.prompt_encoder_tflite.set_tensor(input_details[3]["index"], concat_points[1])
+                self.prompt_encoder_tflite.set_tensor(input_details[0]["index"], mask_input_dummy)
+                self.prompt_encoder_tflite.set_tensor(input_details[1]["index"], masks_enable)
+                self.prompt_encoder_tflite.invoke()
+
+                sparse_embeddings = self.prompt_encoder_tflite.get_tensor(output_details[1]["index"])
+                dense_embeddings = self.prompt_encoder_tflite.get_tensor(output_details[0]["index"])
+                dense_pe = self.prompt_encoder_tflite.get_tensor(output_details[2]["index"])
 
             sparse_embeddings = torch.Tensor(sparse_embeddings)
             dense_embeddings = torch.Tensor(dense_embeddings)
