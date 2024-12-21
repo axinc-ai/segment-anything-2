@@ -777,13 +777,13 @@ class SAM2ImagePredictor:
             batched_mode = False
 
             if tflite_int8:
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(self._features["image_embed"][img_idx].unsqueeze(0).numpy(), input_details, 3))
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(dense_pe, input_details, 6))
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(sparse_embeddings, input_details, 1))
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(dense_embeddings, input_details, 2))
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(batched_mode, input_details, 5))
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(high_res_features[0].numpy(), input_details, 0))
-                self.mask_decoder_tflite.set_tensor(self.format_input_tensor(high_res_features[1].numpy(), input_details, 4))
+                self.mask_decoder_tflite.set_tensor(input_details[3]["index"], self.format_input_tensor(self._features["image_embed"][img_idx].unsqueeze(0).numpy(), input_details, 3))
+                self.mask_decoder_tflite.set_tensor(input_details[6]["index"], self.format_input_tensor(dense_pe.numpy(), input_details, 6))
+                self.mask_decoder_tflite.set_tensor(input_details[1]["index"], self.format_input_tensor(sparse_embeddings.numpy(), input_details, 1))
+                self.mask_decoder_tflite.set_tensor(input_details[2]["index"], self.format_input_tensor(dense_embeddings.numpy(), input_details, 2))
+                self.mask_decoder_tflite.set_tensor(input_details[5]["index"], batched_mode)
+                self.mask_decoder_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(high_res_features[0].numpy(), input_details, 0))
+                self.mask_decoder_tflite.set_tensor(input_details[4]["index"], self.format_input_tensor(high_res_features[1].numpy(), input_details, 4))
                 self.mask_decoder_tflite.invoke()
 
                 masks = self.get_output_tensor(self.mask_decoder_tflite, output_details, 2)
