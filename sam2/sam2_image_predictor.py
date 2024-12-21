@@ -202,7 +202,7 @@ class SAM2ImagePredictor:
                 from torch.ao.quantization import quantize_pt2e
 
                 quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False)
+                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
                 )
                 model = torch._export.capture_pre_autograd_graph(self.model, sample_inputs)
                 model = quantize_pt2e.prepare_pt2e(model, quantizer)
@@ -216,13 +216,13 @@ class SAM2ImagePredictor:
                     quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                     _ai_edge_converter_flags=tfl_converter_flags
                 )
-                with_quantizer.export("model/image_encoder_"+model_id+"_int8.tflite")
+                with_quantizer.export("model/image_encoder_"+model_id+".int8.tflite")
 
         if import_from_tflite:
             if self.image_encoder_tflite == None:
                 int8_id = ""
                 if tflite_int8:
-                    int8_id = "_int8"
+                    int8_id = ".int8"
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
                     self.image_encoder_tflite = ailia_tflite.Interpreter(model_path="model/image_encoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
