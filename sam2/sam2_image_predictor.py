@@ -192,31 +192,53 @@ class SAM2ImagePredictor:
             self.model.forward = self.model.forward_image
 
             if not tflite_int8:
-                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]}}
+                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]}}
                 edge_model = ai_edge_torch.convert(self.model, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/image_encoder_"+model_id+".tflite")
 
             if tflite_int8:
-                from ai_edge_torch.quantize import pt2e_quantizer
-                from ai_edge_torch.quantize import quant_config
-                from torch.ao.quantization import quantize_pt2e
+                if False:
+                    # torch quantization
+                    from ai_edge_torch.quantize import pt2e_quantizer
+                    from ai_edge_torch.quantize import quant_config
+                    from torch.ao.quantization import quantize_pt2e
 
-                quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                    pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
-                )
-                model = torch._export.capture_pre_autograd_graph(self.model, sample_inputs)
-                model = quantize_pt2e.prepare_pt2e(model, quantizer)
-                model(input_image) # calibration (you need to edit reset_histogram function)
-                model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
+                    quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
+                        pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
+                    )
+                    model = torch._export.capture_pre_autograd_graph(self.model, sample_inputs)
+                    model = quantize_pt2e.prepare_pt2e(model, quantizer)
+                    model(input_image) # calibration (you need to edit reset_histogram function)
+                    model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
-                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]}}
-                with_quantizer = ai_edge_torch.convert(
-                    model,
-                    sample_inputs,
-                    quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
-                    _ai_edge_converter_flags=tfl_converter_flags
-                )
-                with_quantizer.export("model/image_encoder_"+model_id+".int8.tflite")
+                    tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]}}
+                    with_quantizer = ai_edge_torch.convert(
+                        model,
+                        sample_inputs,
+                        quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
+                        _ai_edge_converter_flags=tfl_converter_flags
+                    )
+                    with_quantizer.export("model/image_encoder_"+model_id+".int8.tflite")
+                else:
+                    # tensorflow quantization
+                    def representative_dataset():
+                        for _ in range(1):
+                            data = input_image.numpy()
+                            yield [data.astype(np.float32)]
+                    
+                    tfl_converter_flags = {
+                        'optimizations': [tf.lite.Optimize.DEFAULT],
+                        'representative_dataset': representative_dataset,
+                        'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
+                        'inference_input_type': tf.int8,
+                        'inference_output_type': tf.int8,
+                    }
+
+                    tfl_fullint_model = ai_edge_torch.convert(
+                        self.model, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                    )
+
+                    tfl_fullint_model.export("model/image_encoder_"+model_id+".int8.tflite")
 
         if import_from_tflite:
             if self.image_encoder_tflite == None:
