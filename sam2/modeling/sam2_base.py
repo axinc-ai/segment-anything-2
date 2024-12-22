@@ -342,6 +342,7 @@ class SAM2Base(torch.nn.Module):
         import_from_onnx=False,
         export_to_tflite=False,
         import_from_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """
@@ -643,27 +644,56 @@ class SAM2Base(torch.nn.Module):
             import ai_edge_torch
             import tensorflow as tf
             sample_inputs = (sam_output_token,)
-            tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
-            edge_model = ai_edge_torch.convert(self.obj_ptr_proj, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
-            edge_model.export("model/mlp_"+model_id+".tflite")
+            if not tflite_int8:
+                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
+                edge_model = ai_edge_torch.convert(self.obj_ptr_proj, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
+                edge_model.export("model/mlp_"+model_id+".tflite")
+            else:
+                # tensorflow
+                def representative_dataset():
+                    for _ in range(1):
+                        data_0 = sam_output_token.numpy()
+                        yield [data_0]
+                
+                tfl_converter_flags = {
+                    'optimizations': [tf.lite.Optimize.DEFAULT],
+                    'representative_dataset': representative_dataset,
+                    'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
+                    'inference_input_type': tf.int8,
+                    'inference_output_type': tf.int8,
+                }
+
+                tfl_fullint_model = ai_edge_torch.convert(
+                    self.obj_ptr_proj, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                )
+
+                tfl_fullint_model.export("model/mlp_"+model_id+".int8.tflite")
 
         if import_from_tflite:
             if self.mlp_tflite == None:
+                int8_id = ""
+                if tflite_int8:
+                    int8_id = ".int8"
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
-                    self.mlp_tflite = ailia_tflite.Interpreter(model_path="model/mlp_"+model_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
+                    self.mlp_tflite = ailia_tflite.Interpreter(model_path="model/mlp_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
                 else:
                     import tensorflow as tf
-                    self.mlp_tflite = tf.lite.Interpreter(model_path="model/mlp_"+model_id+".tflite")
+                    self.mlp_tflite = tf.lite.Interpreter(model_path="model/mlp_"+model_id+int8_id+".tflite")
                 self.mlp_tflite.allocate_tensors()
 
             input_details = self.mlp_tflite.get_input_details()
             output_details = self.mlp_tflite.get_output_details()
 
-            self.mlp_tflite.set_tensor(input_details[0]["index"], sam_output_token.numpy())
-            self.mlp_tflite.invoke()
+            if tflite_int8:
+                self.mlp_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(sam_output_token.numpy(), input_details, 0))
+                self.mlp_tflite.invoke()
+                obj_ptr = self.get_output_tensor(self.mlp_tflite, output_details, 0)
+            else:
+                self.mlp_tflite.set_tensor(input_details[0]["index"], sam_output_token.numpy())
+                self.mlp_tflite.invoke()
+                obj_ptr = self.mlp_tflite.get_tensor(output_details[0]["index"])
 
-            obj_ptr = self.mlp_tflite.get_tensor(output_details[0]["index"])
             obj_ptr = torch.Tensor(obj_ptr)
 
         if not import_from_onnx and not import_from_tflite:
@@ -690,7 +720,7 @@ class SAM2Base(torch.nn.Module):
             object_score_logits,
         )
 
-    def _use_mask_as_output(self, backbone_features, high_res_features, mask_inputs, export_to_onnx, import_from_onnx, export_to_tflite, import_from_tflite, model_id):
+    def _use_mask_as_output(self, backbone_features, high_res_features, mask_inputs, export_to_onnx, import_from_onnx, export_to_tflite, import_from_tflite, tflite_int8, model_id):
         """
         Directly turn binary `mask_inputs` into a output mask logits without using SAM.
         (same input and output shapes as in _forward_sam_heads above).
@@ -723,6 +753,7 @@ class SAM2Base(torch.nn.Module):
                 import_from_onnx=import_from_onnx,
                 export_to_tflite=export_to_tflite,
                 import_from_tflite=import_from_tflite,
+                tflite_int8=tflite_int8,
                 model_id=model_id
             )
         # In this method, we are treating mask_input as output, e.g. using it directly to create spatial mem;
@@ -782,6 +813,7 @@ class SAM2Base(torch.nn.Module):
         import_from_onnx=False,
         export_to_tflite=False,
         import_from_tflite=False,
+        tflite_int8=False,
         model_id=None):
         if export_to_onnx and not self.obj_ptr_tpos_proj_onnx_exported:
             print("x", obj_pos.shape)
@@ -810,18 +842,42 @@ class SAM2Base(torch.nn.Module):
             import ai_edge_torch
             import tensorflow as tf
             sample_inputs = (obj_pos,)
-            tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
-            edge_model = ai_edge_torch.convert(self.obj_ptr_tpos_proj, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
-            edge_model.export("model/obj_ptr_tpos_proj_"+model_id+".tflite")
+            if not tflite_int8:
+                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
+                edge_model = ai_edge_torch.convert(self.obj_ptr_tpos_proj, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
+                edge_model.export("model/obj_ptr_tpos_proj_"+model_id+".tflite")
+            else:
+                # tensorflow
+                def representative_dataset():
+                    for _ in range(1):
+                        data_0 = obj_pos.numpy()
+                        yield [data_0]
+                
+                tfl_converter_flags = {
+                    'optimizations': [tf.lite.Optimize.DEFAULT],
+                    'representative_dataset': representative_dataset,
+                    'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
+                    'inference_input_type': tf.int8,
+                    'inference_output_type': tf.int8,
+                }
 
+                tfl_fullint_model = ai_edge_torch.convert(
+                    self.obj_ptr_tpos_proj, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                )
+
+                tfl_fullint_model.export("model/obj_ptr_tpos_proj_"+model_id+".int8.tflite")
+            
         if import_from_tflite:
             if self.obj_ptr_tpos_proj_tflite == None:
+                int8_id = ""
+                if tflite_int8:
+                    int8_id = ".int8"
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
-                    self.obj_ptr_tpos_proj_tflite = ailia_tflite.Interpreter(model_path="model/obj_ptr_tpos_proj_"+model_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
+                    self.obj_ptr_tpos_proj_tflite = ailia_tflite.Interpreter(model_path="model/obj_ptr_tpos_proj_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
                 else:
                     import tensorflow as tf
-                    self.obj_ptr_tpos_proj_tflite = tf.lite.Interpreter(model_path="model/obj_ptr_tpos_proj_"+model_id+".tflite")
+                    self.obj_ptr_tpos_proj_tflite = tf.lite.Interpreter(model_path="model/obj_ptr_tpos_proj_"+model_id+int8_id+".tflite")
                 self.obj_ptr_tpos_proj_tflite.allocate_tensors()
 
             input_details = self.obj_ptr_tpos_proj_tflite.get_input_details()
@@ -830,9 +886,14 @@ class SAM2Base(torch.nn.Module):
             import numpy as np
             tpos = np.zeros((obj_pos.shape[0], 64))
             for i in range(obj_pos.shape[0]):
-                self.obj_ptr_tpos_proj_tflite.set_tensor(input_details[0]["index"], obj_pos[i:i+1,:].numpy())
-                self.obj_ptr_tpos_proj_tflite.invoke()
-                tpos[i:i+1,:] = self.obj_ptr_tpos_proj_tflite.get_tensor(output_details[0]["index"])
+                if tflite_int8:
+                    self.obj_ptr_tpos_proj_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(obj_pos[i:i+1,:].numpy(), input_details, 0))
+                    self.obj_ptr_tpos_proj_tflite.invoke()
+                    tpos[i:i+1,:] = self.get_output_tensor(self.obj_ptr_tpos_proj_tflite, output_details, 0)
+                else:
+                    self.obj_ptr_tpos_proj_tflite.set_tensor(input_details[0]["index"], obj_pos[i:i+1,:].numpy())
+                    self.obj_ptr_tpos_proj_tflite.invoke()
+                    tpos[i:i+1,:] = self.obj_ptr_tpos_proj_tflite.get_tensor(output_details[0]["index"])
             tpos = torch.Tensor(tpos)
 
         if not import_from_onnx and not import_from_tflite:
@@ -1010,7 +1071,7 @@ class SAM2Base(torch.nn.Module):
                         obj_pos = torch.tensor(pos_list, device=device)
                         obj_pos = get_1d_sine_pe(obj_pos / t_diff_max, dim=tpos_dim)
                         #obj_pos = self.obj_ptr_tpos_proj(obj_pos)
-                        obj_pos = self.call_obj_ptr_tpos_proj(obj_pos, export_to_onnx=export_to_onnx, import_from_onnx=import_from_onnx, export_to_tflite=export_to_tflite, import_from_tflite=import_from_tflite, model_id=model_id)
+                        obj_pos = self.call_obj_ptr_tpos_proj(obj_pos, export_to_onnx=export_to_onnx, import_from_onnx=import_from_onnx, export_to_tflite=export_to_tflite, import_from_tflite=import_from_tflite, tflite_int8=tflite_int8, model_id=model_id)
                         obj_pos = obj_pos.unsqueeze(1).expand(-1, B, self.mem_dim)
                     else:
                         obj_pos = obj_ptrs.new_zeros(len(pos_list), B, self.mem_dim)
@@ -1483,7 +1544,12 @@ class SAM2Base(torch.nn.Module):
             pix_feat = current_vision_feats[-1].permute(1, 2, 0)
             pix_feat = pix_feat.view(-1, self.hidden_dim, *feat_sizes[-1])
             sam_outputs = self._use_mask_as_output(
-                pix_feat, high_res_features, mask_inputs
+                pix_feat, high_res_features, mask_inputs,
+                export_to_onnx=export_to_onnx,
+                import_from_onnx=import_from_onnx,
+                export_to_tflite=export_to_tflite,
+                import_from_tflite=import_from_tflite,
+                tflite_int8=tflite_int8,
             )
         else:
             # fused the visual feature with previous memory features in the memory bank
@@ -1521,6 +1587,7 @@ class SAM2Base(torch.nn.Module):
                 import_from_onnx=import_from_onnx,
                 export_to_tflite=export_to_tflite,
                 import_from_tflite=import_from_tflite,
+                tflite_int8=tflite_int8,
                 model_id=model_id
             )
 
