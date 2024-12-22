@@ -27,6 +27,7 @@ class SAM2ImagePredictor:
         max_hole_area=0.0,
         max_sprinkle_area=0.0,
         image_size=1024,
+        calibration=False,
         **kwargs,
     ) -> None:
         """
@@ -80,6 +81,11 @@ class SAM2ImagePredictor:
         self.image_encoder_tflite = None
         self.prompt_encoder_tflite = None
         self.mask_decoder_tflite = None
+
+        # calibration
+        self.calibration = calibration
+        self.calibration_cnt_image_encoder = 0
+        self.calibration_cnt_mask_decoder = 0
 
     @classmethod
     def from_pretrained(cls, model_id: str, **kwargs) -> "SAM2ImagePredictor":
@@ -192,7 +198,7 @@ class SAM2ImagePredictor:
             self.model.forward = self.model.forward_image
 
             if not tflite_int8:
-                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]}}
+                tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
                 edge_model = ai_edge_torch.convert(self.model, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/image_encoder_"+model_id+".tflite")
 
@@ -221,9 +227,15 @@ class SAM2ImagePredictor:
                     with_quantizer.export("model/image_encoder_"+model_id+".int8.tflite")
                 else:
                     # tensorflow quantization
+                    import glob
+                    images = glob.glob("./calibration/image_encoder/*.npy")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                     def representative_dataset():
-                        for _ in range(1):
-                            data = input_image.numpy()
+                        for i in range(len(images)):
+                            #data = input_image.numpy()
+                            data = np.load(images[i])
                             yield [data.astype(np.float32)]
                     
                     tfl_converter_flags = {
@@ -282,6 +294,12 @@ class SAM2ImagePredictor:
 
         if not import_from_onnx and not import_from_tflite:
             vision_features, vision_pos_enc_0, vision_pos_enc_1, vision_pos_enc_2, backbone_fpn_0, backbone_fpn_1, backbone_fpn_2 = self.model.forward_image(input_image)
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/image_encoder/", exist_ok=True)
+                np.save("./calibration/image_encoder/"+str(self.calibration_cnt_image_encoder)+".npy", input_image)
+                self.calibration_cnt_image_encoder = self.calibration_cnt_image_encoder + 1
+
 
         backbone_out = {"vision_features":torch.Tensor(vision_features),
                         "vision_pos_enc":[torch.Tensor(vision_pos_enc_0), torch.Tensor(vision_pos_enc_1), torch.Tensor(vision_pos_enc_2)],
@@ -813,16 +831,32 @@ class SAM2ImagePredictor:
                     with_quantizer.export("model/mask_decoder_"+model_id+".int8.tflite")
                 else:
                     # tensorflow quantization
+                    import glob
+                    images = glob.glob("./calibration/mask_decoder/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                     def representative_dataset():
-                        for _ in range(1):
-                            data3 = self._features["image_embed"][img_idx].unsqueeze(0).numpy().astype(np.float32)
-                            data6 = dense_pe.numpy().astype(np.float32)
-                            data1 = sparse_embeddings.numpy().astype(np.float32)
-                            data2 = dense_embeddings.numpy().astype(np.float32)
+                        for i in range(len(images)):
+                            #data3 = self._features["image_embed"][img_idx].unsqueeze(0).numpy().astype(np.float32)
+                            #data6 = dense_pe.numpy().astype(np.float32)
+                            #data1 = sparse_embeddings.numpy().astype(np.float32)
+                            #data2 = dense_embeddings.numpy().astype(np.float32)
+                            #data5 = np.zeros((1), dtype=bool)
+                            #data5[0] = batched_mode
+                            #data0 = high_res_features[0].numpy().astype(np.float32)
+                            #data4 = high_res_features[1].numpy().astype(np.float32)
+
+                            npz = np.load(images[i])
+                            data3 = npz["arr_0"]
+                            data6 =npz["arr_1"]
+                            data1 = npz["arr_2"]
+                            data2 = npz["arr_3"]
                             data5 = np.zeros((1), dtype=bool)
                             data5[0] = batched_mode
-                            data0 = high_res_features[0].numpy().astype(np.float32)
-                            data4 = high_res_features[1].numpy().astype(np.float32)
+                            data0 = npz["arr_4"]
+                            data4 = npz["arr_5"]
+
                             yield [data0, data1, data2, data3, data4, data5, data6]
                     
                     tfl_converter_flags = {
@@ -915,6 +949,19 @@ class SAM2ImagePredictor:
                 high_res_features1=high_res_features[0],
                 high_res_features2=high_res_features[1],
             )
+
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/mask_decoder/", exist_ok=True)
+                np.savez("./calibration/mask_decoder/"+str(self.calibration_cnt_mask_decoder)+".npz",
+                    self._features["image_embed"][img_idx].unsqueeze(0).numpy(),
+                    dense_pe.numpy(),
+                    sparse_embeddings.numpy(),
+                    dense_embeddings.numpy(),
+                    high_res_features[0].numpy(),
+                    high_res_features[1].numpy()                       
+                )
+                self.calibration_cnt_mask_decoder = self.calibration_cnt_mask_decoder + 1
 
         # Upscale the masks to the original image resolution
         masks = self._transforms.postprocess_masks(
