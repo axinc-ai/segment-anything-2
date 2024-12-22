@@ -124,7 +124,8 @@ predictor = SAM2ImagePredictor(sam2_model, calibration=calibration)
 images = ['notebooks/images/truck.jpg']
 if calibration:
     import glob
-    images = glob.glob("./calibration/images/*.jpg")
+    #images = glob.glob("./calibration/images/*.jpg")
+    images = glob.glob("./calibration/images_large/*.jpg")
     if len(images) == 0:
         raise Exception("Calibration image not found. Please put images to ./calibration/images/")
 
