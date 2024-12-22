@@ -1276,14 +1276,14 @@ class SAM2Base(torch.nn.Module):
                     import numpy as np
                     for i in range(len(images)):
                         npz = np.load(images[i])
-                        data_0 = npz["arr_0"]
-                        data_1 = npz["arr_1"]
-                        data_2 = npz["arr_2"]
-                        data_3 = npz["arr_3"]
-                        data_4 = npz["arr_4"]
-                        data_5 = npz["arr_5"]
-                        data_6 = npz["arr_6"]
-                        data_7 = npz["arr_7"]
+                        data_0 = torch.tensor(npz["arr_0"])
+                        data_1 = torch.tensor(npz["arr_1"])
+                        data_2 = torch.tensor(npz["arr_2"])
+                        data_3 = torch.tensor(npz["arr_3"])
+                        data_4 = torch.tensor(npz["arr_4"])
+                        data_5 = torch.tensor(npz["arr_5"])
+                        data_6 = torch.tensor(npz["arr_6"])
+                        data_7 = torch.tensor(npz["arr_7"])
                         model(data_0, data_1, data_2, data_3, data_4, data_5, data_6, data_7)
 
                     #model(current_vision_feats[0], memory_1, memory_2, current_vision_pos_embeds[0], memory_pos_embed_1, memory_pos_embed_2, attention_mask_1, attention_mask_2)

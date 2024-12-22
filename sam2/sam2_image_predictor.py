@@ -86,6 +86,7 @@ class SAM2ImagePredictor:
         self.calibration = calibration
         self.calibration_cnt_image_encoder = 0
         self.calibration_cnt_mask_decoder = 0
+        self.calibration_cnt_prompt_encoder = 0
 
     @classmethod
     def from_pretrained(cls, model_id: str, **kwargs) -> "SAM2ImagePredictor":
@@ -645,7 +646,7 @@ class SAM2ImagePredictor:
             dense_pe = torch.Tensor(dense_pe)
 
         tflite_int8_prompt_encoder = tflite_int8
-        tflite_int8_prompt_encoder = False # 精度不足
+        #tflite_int8_prompt_encoder = False # 精度不足
 
         if export_to_tflite:
             import ai_edge_torch
@@ -680,13 +681,21 @@ class SAM2ImagePredictor:
                     with_quantizer.export("model/prompt_encoder_"+model_id+".int8.tflite")
                 else:
                     # tensorflow quantization
+                    import glob
+                    images = glob.glob("./calibration/prompt_encoder/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                     def representative_dataset():
-                        for _ in range(1):
-                            data2 = concat_points[0].numpy()
-                            data3 = concat_points[1].numpy()
-                            data0 = mask_input_dummy.numpy()
-                            data1 = masks_enable.numpy()
+                        for i in range(len(images)):
+                            npz = np.load(images[i])
+                            data2 = npz["arr_0"]
+                            data3 = npz["arr_1"]
+                            data0 = npz["arr_2"]
+                            data1 = npz["arr_3"]
+
                             yield [data0, data1, data2, data3]
+
                     
                     tfl_converter_flags = {
                         'optimizations': [tf.lite.Optimize.DEFAULT],
@@ -757,6 +766,17 @@ class SAM2ImagePredictor:
                 masks=mask_input_dummy,
                 masks_enable=masks_enable
             )
+
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/prompt_encoder/", exist_ok=True)
+                np.savez("./calibration/prompt_encoder/"+str(self.calibration_cnt_prompt_encoder)+".npz",
+                    concat_points[0].numpy(),
+                    concat_points[1].numpy(),
+                    mask_input_dummy.numpy(),
+                    masks_enable.numpy()
+                )
+                self.calibration_cnt_prompt_encoder = self.calibration_cnt_prompt_encoder + 1
 
         # Predict masks
         batched_mode = (
@@ -959,7 +979,7 @@ class SAM2ImagePredictor:
                     sparse_embeddings.numpy(),
                     dense_embeddings.numpy(),
                     high_res_features[0].numpy(),
-                    high_res_features[1].numpy()                       
+                    high_res_features[1].numpy()
                 )
                 self.calibration_cnt_mask_decoder = self.calibration_cnt_mask_decoder + 1
 
