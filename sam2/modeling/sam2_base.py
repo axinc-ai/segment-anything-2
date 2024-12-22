@@ -229,6 +229,10 @@ class SAM2Base(torch.nn.Module):
         self.memory_encoder_tflite = None
         self.obj_ptr_tpos_proj_tflite = None
 
+        # calibration
+        self.calibration = False
+        self.calibration_cnt_memory_attention = 0
+
         # Check decoder sample parameter
         assert(self.image_size == 512 or self.image_size == 1024)
         assert(self.num_feature_levels == 3)
@@ -1118,7 +1122,7 @@ class SAM2Base(torch.nn.Module):
         memory_pos_embed_2 = memory_pos_embed[-num_obj_ptr_tokens:,:,:]
 
         # Static Shapeに変換するために、定数フレームに変換する
-        convert_to_static_shape = export_to_tflite or import_from_tflite
+        convert_to_static_shape = export_to_tflite or import_from_tflite or self.calibration
         if convert_to_static_shape:
             max_num_frames = 8
             memory_1_pad = torch.zeros(max_num_frames * self.sam_image_embedding_size * self.sam_image_embedding_size, memory_1.shape[1], memory_1.shape[2])
@@ -1229,16 +1233,33 @@ class SAM2Base(torch.nn.Module):
                     with_quantizer.export("model/memory_attention_"+model_id+".int8.tflite")
                 else:
                     # tensorflow
+                    import glob
+                    images = glob.glob("./calibration/memory_attention/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                     def representative_dataset():
-                        for _ in range(1):
-                            data_3 = current_vision_feats[0].numpy()
-                            data_6 = memory_1.numpy()
-                            data_1 = memory_2.numpy()
-                            data_2 = current_vision_pos_embeds[0].numpy()
-                            data_5 = memory_pos_embed_1.numpy()
-                            data_0 = memory_pos_embed_2.numpy()
-                            data_4 = attention_mask_1.numpy()
-                            data_7 = attention_mask_2.numpy()
+                        import numpy as np
+                        for i in range(len(images)):
+                            #data_3 = current_vision_feats[0].numpy()
+                            #data_6 = memory_1.numpy()
+                            #data_1 = memory_2.numpy()
+                            #data_2 = current_vision_pos_embeds[0].numpy()
+                            #data_5 = memory_pos_embed_1.numpy()
+                            #data_0 = memory_pos_embed_2.numpy()
+                            #data_4 = attention_mask_1.numpy()
+                            #data_7 = attention_mask_2.numpy()
+
+                            npz = np.load(images[i])
+                            data_3 = npz["arr_0"]
+                            data_6 = npz["arr_1"]
+                            data_1 = npz["arr_2"]
+                            data_2 = npz["arr_3"]
+                            data_5 = npz["arr_4"]
+                            data_0 = npz["arr_5"]
+                            data_4 = npz["arr_6"]
+                            data_7 = npz["arr_7"]
+
                             yield [data_0, data_1, data_2, data_3, data_4, data_5, data_6, data_7]
                     
                     tfl_converter_flags = {
@@ -1354,6 +1375,23 @@ class SAM2Base(torch.nn.Module):
                 attention_mask_1=attention_mask_1,
                 attention_mask_2=attention_mask_2,
             )
+
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/memory_attention/", exist_ok=True)
+                import numpy as np
+                np.savez("./calibration/memory_attention/"+str(self.calibration_cnt_memory_attention)+".npz",
+                    current_vision_feats[0].numpy(),
+                    memory_1.numpy(),
+                    memory_2.numpy(),
+                    current_vision_pos_embeds[0].numpy(),
+                    memory_pos_embed_1.numpy(),
+                    memory_pos_embed_2.numpy(),
+                    attention_mask_1.numpy(),
+                    attention_mask_2.numpy(),
+                )
+                self.calibration_cnt_memory_attention = self.calibration_cnt_memory_attention + 1
+
 
         # reshape the output (HW)BC => BCHW
         pix_feat_with_mem = pix_feat_with_mem.permute(1, 2, 0).view(B, C, H, W)

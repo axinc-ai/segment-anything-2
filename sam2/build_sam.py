@@ -107,6 +107,7 @@ def build_sam2_video_predictor(
     hydra_overrides_extra=[],
     apply_postprocessing=True,
     image_size=1024,
+    calibration=False,
     **kwargs,
 ):
     hydra_overrides = [
@@ -131,6 +132,7 @@ def build_sam2_video_predictor(
     cfg.model.image_size = image_size
     OmegaConf.resolve(cfg)
     model = instantiate(cfg.model, _recursive_=True)
+    model.calibration = calibration
     _load_checkpoint(model, ckpt_path)
     model = model.to(device)
     if mode == "eval":

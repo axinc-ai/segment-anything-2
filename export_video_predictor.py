@@ -6,7 +6,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--model_id', default="hiera_t", choices=["hiera_l", "hiera_b+", "hiera_s", "hiera_t"])
 parser.add_argument('--framework', default="onnx", choices=["onnx", "tflite", "torch", "ailia_tflite"])
 parser.add_argument('--accuracy', default="float", choices=["float", "int8"])
-parser.add_argument('--mode', default="both", choices=["both", "import", "export"])
+parser.add_argument('--mode', default="both", choices=["both", "import", "export", "calibration"])
 parser.add_argument('--image_size', default=1024, type=int, choices=[512, 1024])
 parser.add_argument('--version', default="2.1", choices=["2", "2.1"])
 args = parser.parse_args()
@@ -27,6 +27,7 @@ import_from_onnx = args.framework=="onnx" and (args.mode=="import" or args.mode=
 export_to_tflite = args.framework=="tflite" and (args.mode=="export" or args.mode=="both")
 import_from_tflite = (args.framework=="tflite" or args.framework=="ailia_tflite") and (args.mode=="import" or args.mode=="both")
 tflite_int8 = (args.accuracy == "int8")
+calibration = args.mode == "calibration"
 
 if args.framework=="ailia_tflite" and import_from_tflite:
     import_from_tflite = "ailia_tflite"
@@ -60,7 +61,7 @@ print(f"using device: {device}")
 
 from sam2.build_sam import build_sam2_video_predictor
 
-predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device, image_size=args.image_size)
+predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device, image_size=args.image_size, calibration=calibration)
 
 #if export_to_tflite or import_from_tflite:
 #    predictor.set_num_maskmem(num_maskmem=1, max_obj_ptrs_in_encoder=1)
