@@ -1201,13 +1201,16 @@ class SAM2Base(torch.nn.Module):
             pix_feat_with_mem = self.memory_attention_onnx.run(None, {"curr":current_vision_feats[0].numpy(), "memory_1":memory_1.numpy(), "memory_2":memory_2.numpy(), "curr_pos":current_vision_pos_embeds[0].numpy(), "memory_pos_1":memory_pos_embed_1.numpy(), "memory_pos_2":memory_pos_embed_2.numpy(), "attention_mask_1":attention_mask_1.numpy(), "attention_mask_2":attention_mask_2.numpy()})
             pix_feat_with_mem = torch.Tensor(pix_feat_with_mem[0])
         
+        tflite_int8_memory_attention = tflite_int8
+        #tflite_int8_memory_attention = False
+        
         if export_to_tflite and not self.memory_attention_tflite_exported:
             self.memory_attention_tflite_exported = True
             import ai_edge_torch
             import tensorflow as tf
             sample_inputs = (current_vision_feats[0], memory_1, memory_2, current_vision_pos_embeds[0], memory_pos_embed_1, memory_pos_embed_2, attention_mask_1, attention_mask_2)
             tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
-            if not tflite_int8:
+            if not tflite_int8_memory_attention:
                 edge_model = ai_edge_torch.convert(self.memory_attention, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/memory_attention_"+model_id+".tflite")
             else:
@@ -1299,7 +1302,7 @@ class SAM2Base(torch.nn.Module):
                 print("begin memory attention tflite")
             if self.memory_attention_tflite == None:
                 int8_id = ""
-                if tflite_int8:
+                if tflite_int8_memory_attention:
                     int8_id = ".int8"
 
                 if import_from_tflite == "ailia_tflite":
@@ -1331,7 +1334,7 @@ class SAM2Base(torch.nn.Module):
             input_details = self.memory_attention_tflite.get_input_details()
             output_details = self.memory_attention_tflite.get_output_details()
 
-            if tflite_int8:
+            if tflite_int8_memory_attention:
                 self.memory_attention_tflite.set_tensor(input_details[3]["index"], self.format_input_tensor(current_vision_feats[0].numpy(), input_details, 3))
                 self.memory_attention_tflite.set_tensor(input_details[6]["index"], self.format_input_tensor(memory_1.numpy(), input_details, 6))
                 self.memory_attention_tflite.set_tensor(input_details[1]["index"], self.format_input_tensor(memory_2.numpy(), input_details, 1))
@@ -1456,6 +1459,9 @@ class SAM2Base(torch.nn.Module):
             vision_features = torch.Tensor(vision_features)
             vision_pos_enc = torch.Tensor(vision_pos_enc)
 
+        tflite_int8_memory_encoder = tflite_int8
+        #tflite_int8_memory_encoder = False
+
         if export_to_tflite and not self.memory_encoder_tflite_exported:
             self.memory_encoder_tflite_exported = True
 
@@ -1464,7 +1470,7 @@ class SAM2Base(torch.nn.Module):
 
             sample_inputs = (pix_feat, mask_for_mem)
 
-            if not tflite_int8:
+            if not tflite_int8_memory_encoder:
                 tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
                 edge_model = ai_edge_torch.convert(self.memory_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/memory_encoder_"+model_id+".tflite")
@@ -1495,7 +1501,7 @@ class SAM2Base(torch.nn.Module):
                 print("begin memory encoder tflite")
             if self.memory_encoder_tflite == None:
                 int8_id = ""
-                if tflite_int8:
+                if tflite_int8_memory_encoder:
                     int8_id = ".int8"
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
@@ -1508,7 +1514,7 @@ class SAM2Base(torch.nn.Module):
             input_details = self.memory_encoder_tflite.get_input_details()
             output_details = self.memory_encoder_tflite.get_output_details()
 
-            if tflite_int8:
+            if tflite_int8_memory_encoder:
                 self.memory_encoder_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(pix_feat.numpy(), input_details, 0))
                 self.memory_encoder_tflite.set_tensor(input_details[1]["index"], self.format_input_tensor(mask_for_mem.numpy(), input_details, 1))
                 self.memory_encoder_tflite.invoke()
