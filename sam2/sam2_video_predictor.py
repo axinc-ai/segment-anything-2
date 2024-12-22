@@ -592,6 +592,7 @@ class SAM2VideoPredictor(SAM2Base):
                 import_from_onnx=import_from_onnx,
                 export_to_tflite=export_to_tflite,
                 import_from_tflite=import_from_tflite,
+                tflite_int8=tflite_int8,
                 model_id=model_id
             )
             consolidated_out["maskmem_features"] = maskmem_features
@@ -1115,7 +1116,7 @@ class SAM2VideoPredictor(SAM2Base):
         high_res_masks,
         object_score_logits,
         is_mask_from_pts,
-        export_to_onnx, import_from_onnx, export_to_tflite, import_from_tflite, model_id
+        export_to_onnx, import_from_onnx, export_to_tflite, import_from_tflite, tflite_int8, model_id
     ):
         """
         Run the memory encoder on `high_res_masks`. This is usually after applying
@@ -1136,6 +1137,7 @@ class SAM2VideoPredictor(SAM2Base):
             import_from_onnx=import_from_onnx,
             export_to_tflite=export_to_tflite,
             import_from_tflite=import_from_tflite,
+            tflite_int8=tflite_int8,
             model_id=model_id
         )
 

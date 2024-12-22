@@ -1359,10 +1359,13 @@ class SAM2Base(torch.nn.Module):
 
         if export_to_tflite and not self.memory_encoder_tflite_exported:
             self.memory_encoder_tflite_exported = True
+
+            import ai_edge_torch
+            import tensorflow as tf
+
+            sample_inputs = (pix_feat, mask_for_mem)
+
             if not tflite_int8:
-                import ai_edge_torch
-                import tensorflow as tf
-                sample_inputs = (pix_feat, mask_for_mem)
                 tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
                 edge_model = ai_edge_torch.convert(self.memory_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/memory_encoder_"+model_id+".tflite")
@@ -1383,7 +1386,7 @@ class SAM2Base(torch.nn.Module):
                 }
 
                 tfl_fullint_model = ai_edge_torch.convert(
-                    self.memory_attention, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                    self.memory_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
                 )
 
                 tfl_fullint_model.export("model/memory_encoder_"+model_id+".int8.tflite")
