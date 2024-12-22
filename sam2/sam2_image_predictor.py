@@ -646,7 +646,6 @@ class SAM2ImagePredictor:
             dense_pe = torch.Tensor(dense_pe)
 
         tflite_int8_prompt_encoder = tflite_int8
-        #tflite_int8_prompt_encoder = False # 精度不足
 
         if export_to_tflite:
             import ai_edge_torch
@@ -710,6 +709,10 @@ class SAM2ImagePredictor:
                     )
 
                     tfl_fullint_model.export("model/prompt_encoder_"+model_id+".int8.tflite")
+
+        if tflite_int8:
+            tflite_int8_prompt_encoder = False # 精度不足なのでFloatモデルで推論する
+            print("Warning : prompt encoder will use float model for better accuracy.")
 
         if import_from_tflite:
             if self.prompt_encoder_tflite == None:
