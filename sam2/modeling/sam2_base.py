@@ -232,6 +232,9 @@ class SAM2Base(torch.nn.Module):
         # calibration
         self.calibration = False
         self.calibration_cnt_memory_attention = 0
+        self.calibration_cnt_memory_encoder = 0
+        self.calibration_cnt_obj_ptr_tpos_proj = 0
+        self.calibration_cnt_mlp = 0
 
         # Check decoder sample parameter
         assert(self.image_size == 512 or self.image_size == 1024)
@@ -654,11 +657,21 @@ class SAM2Base(torch.nn.Module):
                 edge_model.export("model/mlp_"+model_id+".tflite")
             else:
                 # tensorflow
+                import glob
+                images = glob.glob("./calibration/mlp/*.npz")
+                if len(images) == 0:
+                    raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                 def representative_dataset():
-                    for _ in range(1):
-                        data_0 = sam_output_token.numpy()
+                    import numpy as np
+                    for i in range(len(images)):
+                        #data_0 = sam_output_token.numpy()
+
+                        npz = np.load(images[i])
+                        data_0 = npz["arr_0"]
+
                         yield [data_0]
-                
+
                 tfl_converter_flags = {
                     'optimizations': [tf.lite.Optimize.DEFAULT],
                     'representative_dataset': representative_dataset,
@@ -702,6 +715,15 @@ class SAM2Base(torch.nn.Module):
 
         if not import_from_onnx and not import_from_tflite:
             obj_ptr = self.obj_ptr_proj(sam_output_token)
+
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/mlp/", exist_ok=True)
+                import numpy as np
+                np.savez("./calibration/mlp/"+str(self.calibration_cnt_mlp)+".npz",
+                    sam_output_token.numpy()
+                )
+                self.calibration_cnt_mlp = self.calibration_cnt_mlp + 1
 
         if self.pred_obj_scores:
             # Allow *soft* no obj ptr, unlike for masks
@@ -852,9 +874,19 @@ class SAM2Base(torch.nn.Module):
                 edge_model.export("model/obj_ptr_tpos_proj_"+model_id+".tflite")
             else:
                 # tensorflow
+                import glob
+                images = glob.glob("./calibration/obj_ptr_tpos_proj/*.npz")
+                if len(images) == 0:
+                    raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                 def representative_dataset():
-                    for _ in range(1):
-                        data_0 = obj_pos.numpy()
+                    import numpy as np
+                    for i in range(len(images)):
+                        #data_0 = obj_pos.numpy()
+
+                        npz = np.load(images[i])
+                        data_0 = npz["arr_0"]
+
                         yield [data_0]
                 
                 tfl_converter_flags = {
@@ -902,6 +934,16 @@ class SAM2Base(torch.nn.Module):
 
         if not import_from_onnx and not import_from_tflite:
             tpos = self.obj_ptr_tpos_proj(obj_pos)
+
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/obj_ptr_tpos_proj/", exist_ok=True)
+                import numpy as np
+                for i in range(obj_pos.shape[0]):
+                    np.savez("./calibration/obj_ptr_tpos_proj/"+str(self.calibration_cnt_obj_ptr_tpos_proj)+".npz",
+                        obj_pos[i:i+1,:].numpy()
+                    )
+                    self.calibration_cnt_obj_ptr_tpos_proj = self.calibration_cnt_obj_ptr_tpos_proj + 1
 
         return tpos
 
@@ -1214,7 +1256,7 @@ class SAM2Base(torch.nn.Module):
                 edge_model = ai_edge_torch.convert(self.memory_attention, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/memory_attention_"+model_id+".tflite")
             else:
-                if False:
+                if True: # Memory Attentionはattn_maskをint8に量子化すると精度が出ないため、torchで量子化する
                     # torch
                     from ai_edge_torch.quantize import pt2e_quantizer
                     from ai_edge_torch.quantize import quant_config
@@ -1225,7 +1267,27 @@ class SAM2Base(torch.nn.Module):
                     )
                     model = torch._export.capture_pre_autograd_graph(self.memory_attention, sample_inputs)
                     model = quantize_pt2e.prepare_pt2e(model, quantizer)
-                    model(current_vision_feats[0], memory_1, memory_2, current_vision_pos_embeds[0], memory_pos_embed_1, memory_pos_embed_2, attention_mask_1, attention_mask_2)
+
+                    import glob
+                    images = glob.glob("./calibration/memory_attention/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
+                    import numpy as np
+                    for i in range(len(images)):
+                        npz = np.load(images[i])
+                        data_0 = npz["arr_0"]
+                        data_1 = npz["arr_1"]
+                        data_2 = npz["arr_2"]
+                        data_3 = npz["arr_3"]
+                        data_4 = npz["arr_4"]
+                        data_5 = npz["arr_5"]
+                        data_6 = npz["arr_6"]
+                        data_7 = npz["arr_7"]
+                        model(data_0, data_1, data_2, data_3, data_4, data_5, data_6, data_7)
+
+                    #model(current_vision_feats[0], memory_1, memory_2, current_vision_pos_embeds[0], memory_pos_embed_1, memory_pos_embed_2, attention_mask_1, attention_mask_2)
+                    
                     model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
                     with_quantizer = ai_edge_torch.convert(
@@ -1476,12 +1538,21 @@ class SAM2Base(torch.nn.Module):
                 edge_model.export("model/memory_encoder_"+model_id+".tflite")
             else:
                 # tensorflow
+                import glob
+                images = glob.glob("./calibration/memory_encoder/*.npz")
+                if len(images) == 0:
+                    raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                 def representative_dataset():
-                    for _ in range(1):
-                        data_0 = pix_feat.numpy()
-                        data_1 = mask_for_mem.numpy()
+                    import numpy as np
+                    for i in range(len(images)):
+                        npz = np.load(images[i])
+                        data_0 = npz["arr_0"]
+                        data_1 = npz["arr_1"]
+                        #data_0 = pix_feat.numpy()
+                        #data_1 = mask_for_mem.numpy()
                         yield [data_0, data_1]
-                
+
                 tfl_converter_flags = {
                     'optimizations': [tf.lite.Optimize.DEFAULT],
                     'representative_dataset': representative_dataset,
@@ -1537,6 +1608,16 @@ class SAM2Base(torch.nn.Module):
             vision_features, vision_pos_enc = self.memory_encoder(
                 pix_feat, mask_for_mem#, skip_mask_sigmoid=True  # sigmoid already applied (fixed to constant)
             )
+
+            if self.calibration:
+                import os
+                os.makedirs("./calibration/memory_encoder/", exist_ok=True)
+                import numpy as np
+                np.savez("./calibration/memory_encoder/"+str(self.calibration_cnt_memory_encoder)+".npz",
+                    pix_feat.numpy(),
+                    mask_for_mem.numpy()
+                )
+                self.calibration_cnt_memory_encoder = self.calibration_cnt_memory_encoder + 1
 
         maskmem_features = vision_features
         maskmem_pos_enc = [vision_pos_enc]
