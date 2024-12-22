@@ -93,8 +93,7 @@ def show_box(box, ax):
 video_dir = "./notebooks/videos/bedroom_short"
 
 if calibration:
-    #video_dir = "./calibration/images"
-    video_dir = "./calibration/images_large"
+    video_dir = "./calibration/bedroom"
 
 # scan all the JPEG frame names in this directory
 frame_names = [
