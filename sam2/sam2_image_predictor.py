@@ -747,10 +747,10 @@ class SAM2ImagePredictor:
                 dense_embeddings = self.get_output_tensor(self.prompt_encoder_tflite, output_details, 0)
                 dense_pe = self.get_output_tensor(self.prompt_encoder_tflite, output_details, 2)
             else:
-                self.prompt_encoder_tflite.set_tensor(input_details[2]["index"], concat_points[0])
-                self.prompt_encoder_tflite.set_tensor(input_details[3]["index"], concat_points[1])
-                self.prompt_encoder_tflite.set_tensor(input_details[0]["index"], mask_input_dummy)
-                self.prompt_encoder_tflite.set_tensor(input_details[1]["index"], masks_enable)
+                self.prompt_encoder_tflite.set_tensor(input_details[2]["index"], concat_points[0].numpy())
+                self.prompt_encoder_tflite.set_tensor(input_details[3]["index"], concat_points[1].numpy())
+                self.prompt_encoder_tflite.set_tensor(input_details[0]["index"], mask_input_dummy.numpy())
+                self.prompt_encoder_tflite.set_tensor(input_details[1]["index"], masks_enable.numpy())
                 self.prompt_encoder_tflite.invoke()
 
                 sparse_embeddings = self.prompt_encoder_tflite.get_tensor(output_details[1]["index"])
@@ -940,9 +940,9 @@ class SAM2ImagePredictor:
                 object_score_logits = self.get_output_tensor(self.mask_decoder_tflite, output_details, 1)
             else:
                 self.mask_decoder_tflite.set_tensor(input_details[3]["index"], self._features["image_embed"][img_idx].unsqueeze(0).numpy())
-                self.mask_decoder_tflite.set_tensor(input_details[6]["index"], dense_pe)
-                self.mask_decoder_tflite.set_tensor(input_details[1]["index"], sparse_embeddings)
-                self.mask_decoder_tflite.set_tensor(input_details[2]["index"], dense_embeddings)
+                self.mask_decoder_tflite.set_tensor(input_details[6]["index"], dense_pe.numpy())
+                self.mask_decoder_tflite.set_tensor(input_details[1]["index"], sparse_embeddings.numpy())
+                self.mask_decoder_tflite.set_tensor(input_details[2]["index"], dense_embeddings.numpy())
                 self.mask_decoder_tflite.set_tensor(input_details[5]["index"], batched_mode)
                 self.mask_decoder_tflite.set_tensor(input_details[0]["index"], high_res_features[0].numpy())
                 self.mask_decoder_tflite.set_tensor(input_details[4]["index"], high_res_features[1].numpy())
