@@ -50,6 +50,7 @@ class SAM2VideoPredictor(SAM2Base):
         async_loading_frames=False,
         import_from_onnx=False,
         import_from_tflite=False,
+        tflite_int8=False,
         model_id=None
     ):
         """Initialize an inference state."""
@@ -111,7 +112,7 @@ class SAM2VideoPredictor(SAM2Base):
         inference_state["tracking_has_started"] = False
         inference_state["frames_already_tracked"] = {}
         # Warm up the visual backbone and cache the image feature on frame 0
-        self._get_image_feature(inference_state, frame_idx=0, batch_size=1, import_from_onnx=import_from_onnx, import_from_tflite=import_from_tflite, model_id=model_id)
+        self._get_image_feature(inference_state, frame_idx=0, batch_size=1, import_from_onnx=import_from_onnx, import_from_tflite=import_from_tflite, tflite_int8=tflite_int8, model_id=model_id)
         return inference_state
 
     @classmethod
@@ -953,7 +954,7 @@ class SAM2VideoPredictor(SAM2Base):
         inference_state["tracking_has_started"] = False
         inference_state["frames_already_tracked"].clear()
 
-    def _get_image_feature(self, inference_state, frame_idx, batch_size, import_from_onnx = False, import_from_tflite = False, model_id = None):
+    def _get_image_feature(self, inference_state, frame_idx, batch_size, import_from_onnx = False, import_from_tflite = False, tflite_int8 = False, model_id = None):
         """Compute the image features on a given frame."""
         # Look up in the cache first
         image, backbone_out = inference_state["cached_features"].get(
@@ -974,28 +975,47 @@ class SAM2VideoPredictor(SAM2Base):
             if import_from_tflite:
                 if self.debug:
                     print("begin image encoder tflite")
+
+                if tflite_int8:
+                    int8_id = ""
+                    if tflite_int8:
+                        int8_id = ".int8"
+
                 if self.image_encoder_tflite == None:
                     if import_from_tflite == "ailia_tflite":
                         import ailia_tflite
-                        self.image_encoder_tflite = ailia_tflite.Interpreter(model_path="model/image_encoder_"+model_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
+                        self.image_encoder_tflite = ailia_tflite.Interpreter(model_path="model/image_encoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
                     else:
                         import tensorflow as tf
-                        self.image_encoder_tflite = tf.lite.Interpreter(model_path="model/image_encoder_"+model_id+".tflite")
+                        self.image_encoder_tflite = tf.lite.Interpreter(model_path="model/image_encoder_"+model_id+int8_id+".tflite")
                     self.image_encoder_tflite.allocate_tensors()
 
                 input_details = self.image_encoder_tflite.get_input_details()
                 output_details = self.image_encoder_tflite.get_output_details()
 
-                self.image_encoder_tflite.set_tensor(input_details[0]["index"], image.numpy())
-                self.image_encoder_tflite.invoke()
+                if tflite_int8:
+                    self.image_encoder_tflite.set_tensor(input_details[0]["index"], self.format_input_tensor(image.numpy(), input_details, 0))
 
-                vision_features = self.image_encoder_tflite.get_tensor(output_details[4]["index"])
-                vision_pos_enc_0 = self.image_encoder_tflite.get_tensor(output_details[1]["index"])
-                vision_pos_enc_1 = self.image_encoder_tflite.get_tensor(output_details[5]["index"])
-                vision_pos_enc_2 = self.image_encoder_tflite.get_tensor(output_details[3]["index"])
-                backbone_fpn_0 = self.image_encoder_tflite.get_tensor(output_details[0]["index"])
-                backbone_fpn_1 = self.image_encoder_tflite.get_tensor(output_details[2]["index"])
-                backbone_fpn_2 = self.image_encoder_tflite.get_tensor(output_details[6]["index"])
+                    self.image_encoder_tflite.invoke()
+
+                    vision_features = self.get_output_tensor(self.image_encoder_tflite, output_details, 4)
+                    vision_pos_enc_0 = self.get_output_tensor(self.image_encoder_tflite, output_details, 1)
+                    vision_pos_enc_1 = self.get_output_tensor(self.image_encoder_tflite, output_details, 5)
+                    vision_pos_enc_2 = self.get_output_tensor(self.image_encoder_tflite, output_details, 3)
+                    backbone_fpn_0 = self.get_output_tensor(self.image_encoder_tflite, output_details, 0)
+                    backbone_fpn_1 = self.get_output_tensor(self.image_encoder_tflite, output_details, 2)
+                    backbone_fpn_2 = self.get_output_tensor(self.image_encoder_tflite, output_details, 6)
+                else:
+                    self.image_encoder_tflite.set_tensor(input_details[0]["index"], image.numpy())
+                    self.image_encoder_tflite.invoke()
+
+                    vision_features = self.image_encoder_tflite.get_tensor(output_details[4]["index"])
+                    vision_pos_enc_0 = self.image_encoder_tflite.get_tensor(output_details[1]["index"])
+                    vision_pos_enc_1 = self.image_encoder_tflite.get_tensor(output_details[5]["index"])
+                    vision_pos_enc_2 = self.image_encoder_tflite.get_tensor(output_details[3]["index"])
+                    backbone_fpn_0 = self.image_encoder_tflite.get_tensor(output_details[0]["index"])
+                    backbone_fpn_1 = self.image_encoder_tflite.get_tensor(output_details[2]["index"])
+                    backbone_fpn_2 = self.image_encoder_tflite.get_tensor(output_details[6]["index"])
 
             if not import_from_onnx and not import_from_tflite:
                 if self.debug:
@@ -1055,7 +1075,7 @@ class SAM2VideoPredictor(SAM2Base):
             current_vision_feats,
             current_vision_pos_embeds,
             feat_sizes,
-        ) = self._get_image_feature(inference_state, frame_idx, batch_size, import_from_onnx=import_from_onnx, import_from_tflite=import_from_tflite, model_id=model_id)
+        ) = self._get_image_feature(inference_state, frame_idx, batch_size, import_from_onnx=import_from_onnx, import_from_tflite=import_from_tflite, tflite_int8=tflite_int8, model_id=model_id)
 
         # point and mask should not appear as input simultaneously on the same frame
         assert point_inputs is None or mask_inputs is None
@@ -1125,7 +1145,7 @@ class SAM2VideoPredictor(SAM2Base):
         """
         # Retrieve correct image features
         _, _, current_vision_feats, _, feat_sizes = self._get_image_feature(
-            inference_state, frame_idx, batch_size, import_from_onnx=import_from_onnx, import_from_tflite=import_from_tflite, model_id=model_id
+            inference_state, frame_idx, batch_size, import_from_onnx=import_from_onnx, import_from_tflite=import_from_tflite, tflite_int8=tflite_int8, model_id=model_id
         )
         maskmem_features, maskmem_pos_enc = self._encode_new_memory(
             current_vision_feats=current_vision_feats,
