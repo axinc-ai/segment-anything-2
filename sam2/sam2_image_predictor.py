@@ -215,15 +215,22 @@ class SAM2ImagePredictor:
                     )
                     model = torch._export.capture_pre_autograd_graph(self.model, sample_inputs)
                     model = quantize_pt2e.prepare_pt2e(model, quantizer)
-                    model(input_image) # calibration (you need to edit reset_histogram function)
+
+                    import glob
+                    images = glob.glob("./calibration/image_encoder/*.npy")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
+                    for i in range(len(images)):
+                        data = torch.tensor(np.load(images[i]))
+                        model(data) # calibration (you need to edit reset_histogram function)
+
                     model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
-                    tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]}}
                     with_quantizer = ai_edge_torch.convert(
                         model,
                         sample_inputs,
                         quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
-                        _ai_edge_converter_flags=tfl_converter_flags
                     )
                     with_quantizer.export("model/image_encoder_"+model_id+".int8.tflite")
                 else:
@@ -843,7 +850,23 @@ class SAM2ImagePredictor:
                     )
                     model = torch._export.capture_pre_autograd_graph(self.model.sam_mask_decoder, sample_inputs)
                     model = quantize_pt2e.prepare_pt2e(model, quantizer)
-                    model(self._features["image_embed"][img_idx].unsqueeze(0), dense_pe, sparse_embeddings, dense_embeddings, batched_mode, high_res_features[0], high_res_features[1]) # calibration
+
+                    import glob
+                    images = glob.glob("./calibration/mask_decoder/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
+                    for i in range(len(images)):
+                        npz = np.load(images[i])
+                        data0 = torch.tensor(npz["arr_0"])
+                        data1 = torch.tensor(npz["arr_1"])
+                        data2 = torch.tensor(npz["arr_2"])
+                        data3 = torch.tensor(npz["arr_3"])
+                        data4 = batched_mode
+                        data5 = torch.tensor(npz["arr_4"])
+                        data6 = torch.tensor(npz["arr_5"])
+                        model(data0, data1, data2, data3, data4, data5, data6)
+
                     model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
                     with_quantizer = ai_edge_torch.convert(
