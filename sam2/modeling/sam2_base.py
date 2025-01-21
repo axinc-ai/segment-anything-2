@@ -489,7 +489,7 @@ class SAM2Base(torch.nn.Module):
             if self.prompt_encoder_tflite == None:
                 int8_id = ""
                 if tflite_int8_prompt_encoder:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8_prompt_encoder
 
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
@@ -531,7 +531,7 @@ class SAM2Base(torch.nn.Module):
             if self.mask_decoder_tflite == None:
                 int8_id = ""
                 if tflite_int8:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8
 
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
@@ -1296,7 +1296,7 @@ class SAM2Base(torch.nn.Module):
                 edge_model = ai_edge_torch.convert(self.memory_attention, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/memory_attention_"+model_id+".tflite")
             else:
-                if True: # Memory Attentionはattn_maskをint8に量子化すると精度が出ないため、torchで量子化する
+                if tflite_int8 == "mixed": # Memory Attentionはattn_maskをint8に量子化すると精度が出ないため、torchで量子化する
                     # torch
                     from ai_edge_torch.quantize import pt2e_quantizer
                     from ai_edge_torch.quantize import quant_config
@@ -1335,7 +1335,7 @@ class SAM2Base(torch.nn.Module):
                         sample_inputs,
                         quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                     )
-                    with_quantizer.export("model/memory_attention_"+model_id+".int8.tflite")
+                    with_quantizer.export("model/memory_attention_"+model_id+".mixed.tflite")
                 else:
                     # tensorflow
                     import glob
@@ -1405,7 +1405,7 @@ class SAM2Base(torch.nn.Module):
             if self.memory_attention_tflite == None:
                 int8_id = ""
                 if tflite_int8_memory_attention:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8_memory_attention
 
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
@@ -1562,7 +1562,8 @@ class SAM2Base(torch.nn.Module):
             vision_pos_enc = torch.Tensor(vision_pos_enc)
 
         tflite_int8_memory_encoder = tflite_int8
-        #tflite_int8_memory_encoder = False
+        if tflite_int8_memory_encoder == "mixed":
+            tflite_int8_memory_encoder = "int8" # 暫定
 
         if export_to_tflite and not self.memory_encoder_tflite_exported:
             self.memory_encoder_tflite_exported = True
@@ -1577,35 +1578,68 @@ class SAM2Base(torch.nn.Module):
                 edge_model = ai_edge_torch.convert(self.memory_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/memory_encoder_"+model_id+".tflite")
             else:
-                # tensorflow
-                import glob
-                images = glob.glob("./calibration/memory_encoder/*.npz")
-                if len(images) == 0:
-                    raise Exception("Calibration data not found. Please run --mode calibration first.")
+                if tflite_int8_memory_encoder == "mixed":
+                    # torch
+                    from ai_edge_torch.quantize import pt2e_quantizer
+                    from ai_edge_torch.quantize import quant_config
+                    from torch.ao.quantization import quantize_pt2e
 
-                def representative_dataset():
+                    quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
+                        pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
+                    )
+                    model = torch._export.capture_pre_autograd_graph(self.memory_encoder, sample_inputs)
+                    model = quantize_pt2e.prepare_pt2e(model, quantizer)
+
+                    import glob
+                    images = glob.glob("./calibration/memory_encoder/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
+
                     import numpy as np
                     for i in range(len(images)):
                         npz = np.load(images[i])
-                        data_0 = npz["arr_0"]
-                        data_1 = npz["arr_1"]
-                        #data_0 = pix_feat.numpy()
-                        #data_1 = mask_for_mem.numpy()
-                        yield [data_0, data_1]
+                        data_0 = torch.tensor(npz["arr_0"])
+                        data_1 = torch.tensor(npz["arr_1"])
+                        model(data_0, data_1)
 
-                tfl_converter_flags = {
-                    'optimizations': [tf.lite.Optimize.DEFAULT],
-                    'representative_dataset': representative_dataset,
-                    'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
-                    'inference_input_type': tf.int8,
-                    'inference_output_type': tf.int8,
-                }
+                    model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
 
-                tfl_fullint_model = ai_edge_torch.convert(
-                    self.memory_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
-                )
+                    with_quantizer = ai_edge_torch.convert(
+                        model,
+                        sample_inputs,
+                        quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
+                    )
+                    with_quantizer.export("model/memory_encoder_"+model_id+".mixed.tflite")
+                else:
+                    # tensorflow
+                    import glob
+                    images = glob.glob("./calibration/memory_encoder/*.npz")
+                    if len(images) == 0:
+                        raise Exception("Calibration data not found. Please run --mode calibration first.")
 
-                tfl_fullint_model.export("model/memory_encoder_"+model_id+".int8.tflite")
+                    def representative_dataset():
+                        import numpy as np
+                        for i in range(len(images)):
+                            npz = np.load(images[i])
+                            data_0 = npz["arr_0"]
+                            data_1 = npz["arr_1"]
+                            #data_0 = pix_feat.numpy()
+                            #data_1 = mask_for_mem.numpy()
+                            yield [data_0, data_1]
+
+                    tfl_converter_flags = {
+                        'optimizations': [tf.lite.Optimize.DEFAULT],
+                        'representative_dataset': representative_dataset,
+                        'target_spec.supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS_INT8],
+                        'inference_input_type': tf.int8,
+                        'inference_output_type': tf.int8,
+                    }
+
+                    tfl_fullint_model = ai_edge_torch.convert(
+                        self.memory_encoder, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags
+                    )
+
+                    tfl_fullint_model.export("model/memory_encoder_"+model_id+".int8.tflite")
             
         if import_from_tflite:
             if self.debug:
@@ -1613,7 +1647,7 @@ class SAM2Base(torch.nn.Module):
             if self.memory_encoder_tflite == None:
                 int8_id = ""
                 if tflite_int8_memory_encoder:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8_memory_encoder
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
                     self.memory_encoder_tflite = ailia_tflite.Interpreter(model_path="model/memory_encoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)

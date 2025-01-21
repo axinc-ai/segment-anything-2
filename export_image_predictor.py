@@ -5,7 +5,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_id', default="hiera_t", choices=["hiera_l", "hiera_b+", "hiera_s", "hiera_t"])
 parser.add_argument('--framework', default="onnx", choices=["onnx", "tflite", "torch", "ailia_tflite"])
-parser.add_argument('--accuracy', default="float", choices=["float", "int8"])
+parser.add_argument('--accuracy', default="float", choices=["float", "int8", "mixed"])
 parser.add_argument('--mode', default="both", choices=["both", "import", "export", "calibration"])
 parser.add_argument('--image_size', default=1024, type=int, choices=[512, 1024])
 parser.add_argument('--version', default="2.1", choices=["2", "2.1"])
@@ -38,7 +38,7 @@ calibration = args.mode == "calibration"
 if args.framework=="ailia_tflite" and import_from_tflite:
     import_from_tflite = "ailia_tflite"
 
-tflite_int8 = args.accuracy == "int8"
+tflite_int8 = False if args.accuracy == "float" else args.accuracy
 
 # export PJRT_DEVICE=CPU
 
@@ -114,7 +114,7 @@ def show_masks(output_path, image, masks, scores, point_coords=None, box_coords=
             plt.title(f"Mask {i+1}, Score: {score:.3f}", fontsize=18)
         plt.axis('off')
         #plt.show()
-        plt.savefig(f'{output_path}{i+1}_'+model_id+'.png')
+        plt.savefig(f'{output_path}{i+1}_'+model_id+'.'+args.accuracy+'.png')
 
 # logic
 sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device, image_size=args.image_size)

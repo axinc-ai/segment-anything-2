@@ -202,9 +202,9 @@ class SAM2ImagePredictor:
                 tfl_converter_flags = {'target_spec': {'supported_ops': [tf.lite.OpsSet.TFLITE_BUILTINS]}}
                 edge_model = ai_edge_torch.convert(self.model, sample_inputs, _ai_edge_converter_flags=tfl_converter_flags)
                 edge_model.export("model/image_encoder_"+model_id+".tflite")
-
+            
             if tflite_int8:
-                if False:
+                if tflite_int8 == "mixed":
                     # torch quantization
                     from ai_edge_torch.quantize import pt2e_quantizer
                     from ai_edge_torch.quantize import quant_config
@@ -232,7 +232,7 @@ class SAM2ImagePredictor:
                         sample_inputs,
                         quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                     )
-                    with_quantizer.export("model/image_encoder_"+model_id+".int8.tflite")
+                    with_quantizer.export("model/image_encoder_"+model_id+".mixed.tflite")
                 else:
                     # tensorflow quantization
                     import glob
@@ -264,7 +264,7 @@ class SAM2ImagePredictor:
             if self.image_encoder_tflite == None:
                 int8_id = ""
                 if tflite_int8:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
                     self.image_encoder_tflite = ailia_tflite.Interpreter(model_path="model/image_encoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
@@ -684,7 +684,7 @@ class SAM2ImagePredictor:
                         sample_inputs,
                         quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                     )
-                    with_quantizer.export("model/prompt_encoder_"+model_id+".int8.tflite")
+                    with_quantizer.export("model/prompt_encoder_"+model_id+".mixed.tflite")
                 else:
                     # tensorflow quantization
                     import glob
@@ -725,7 +725,7 @@ class SAM2ImagePredictor:
             if self.prompt_encoder_tflite == None:
                 int8_id = ""
                 if tflite_int8_prompt_encoder:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8_prompt_encoder
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
                     self.prompt_encoder_tflite = ailia_tflite.Interpreter(model_path="model/prompt_encoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)
@@ -839,7 +839,7 @@ class SAM2ImagePredictor:
                 edge_model.export("model/mask_decoder_"+model_id+".tflite")
 
             if tflite_int8:
-                if False:
+                if tflite_int8 == "mixed":
                     # torch quantization
                     from ai_edge_torch.quantize import pt2e_quantizer
                     from ai_edge_torch.quantize import quant_config
@@ -874,7 +874,7 @@ class SAM2ImagePredictor:
                         sample_inputs,
                         quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                     )
-                    with_quantizer.export("model/mask_decoder_"+model_id+".int8.tflite")
+                    with_quantizer.export("model/mask_decoder_"+model_id+".mixed.tflite")
                 else:
                     # tensorflow quantization
                     import glob
@@ -927,7 +927,7 @@ class SAM2ImagePredictor:
             if self.mask_decoder_tflite == None:
                 int8_id = ""
                 if tflite_int8:
-                    int8_id = ".int8"
+                    int8_id = "." + tflite_int8
                 if import_from_tflite == "ailia_tflite":
                     import ailia_tflite
                     self.mask_decoder_tflite  = ailia_tflite.Interpreter(model_path="model/mask_decoder_"+model_id+int8_id+".tflite", memory_mode=ailia_tflite.AILIA_TFLITE_MEMORY_MODE_REDUCE_INTERSTAGE, flags=ailia_tflite.AILIA_TFLITE_FLAG_DYNAMIC_QUANT)

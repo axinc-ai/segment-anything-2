@@ -979,7 +979,7 @@ class SAM2VideoPredictor(SAM2Base):
                 if tflite_int8:
                     int8_id = ""
                     if tflite_int8:
-                        int8_id = ".int8"
+                        int8_id = "." + tflite_int8
 
                 if self.image_encoder_tflite == None:
                     if import_from_tflite == "ailia_tflite":

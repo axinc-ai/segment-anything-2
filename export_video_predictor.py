@@ -5,7 +5,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_id', default="hiera_t", choices=["hiera_l", "hiera_b+", "hiera_s", "hiera_t"])
 parser.add_argument('--framework', default="onnx", choices=["onnx", "tflite", "torch", "ailia_tflite"])
-parser.add_argument('--accuracy', default="float", choices=["float", "int8"])
+parser.add_argument('--accuracy', default="float", choices=["float", "int8", "mixed"])
 parser.add_argument('--mode', default="both", choices=["both", "import", "export", "calibration"])
 parser.add_argument('--image_size', default=1024, type=int, choices=[512, 1024])
 parser.add_argument('--version', default="2.1", choices=["2", "2.1"])
@@ -26,7 +26,7 @@ export_to_onnx = args.framework=="onnx" and (args.mode=="export" or args.mode=="
 import_from_onnx = args.framework=="onnx" and (args.mode=="import" or args.mode=="both")
 export_to_tflite = args.framework=="tflite" and (args.mode=="export" or args.mode=="both")
 import_from_tflite = (args.framework=="tflite" or args.framework=="ailia_tflite") and (args.mode=="import" or args.mode=="both")
-tflite_int8 = (args.accuracy == "int8")
+tflite_int8 = False if args.accuracy == "float" else args.accuracy
 calibration = args.mode == "calibration"
 
 if args.framework=="ailia_tflite" and import_from_tflite:
@@ -139,7 +139,7 @@ plt.imshow(Image.open(os.path.join(video_dir, frame_names[ann_frame_idx])))
 show_points(points, labels, plt.gca())
 show_mask((out_mask_logits[0] > 0.0).cpu().numpy(), plt.gca(), obj_id=out_obj_ids[0])
 #plt.show()
-plt.savefig(f'output/video_'+model_id+'.png')
+plt.savefig(f'output/video_'+model_id+'.'+args.accuracy+'.png')
 
 # run propagation throughout the video and collect the results in a dict
 video_segments = {}  # video_segments contains the per-frame segmentation results
@@ -159,4 +159,4 @@ for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
     for out_obj_id, out_mask in video_segments[out_frame_idx].items():
         show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
     #plt.show()
-    plt.savefig(f'output/video{out_frame_idx+1}_'+model_id+'.png')
+    plt.savefig(f'output/video{out_frame_idx+1}_'+model_id+'.'+args.accuracy+'.png')
