@@ -1562,8 +1562,8 @@ class SAM2Base(torch.nn.Module):
             vision_pos_enc = torch.Tensor(vision_pos_enc)
 
         tflite_int8_memory_encoder = tflite_int8
-        if tflite_int8_memory_encoder == "mixed":
-            tflite_int8_memory_encoder = "int8" # 暫定
+        #if tflite_int8_memory_encoder == "mixed":
+        #    tflite_int8_memory_encoder = "int8" # 暫定
 
         if export_to_tflite and not self.memory_encoder_tflite_exported:
             self.memory_encoder_tflite_exported = True
@@ -1584,9 +1584,44 @@ class SAM2Base(torch.nn.Module):
                     from ai_edge_torch.quantize import quant_config
                     from torch.ao.quantization import quantize_pt2e
 
-                    quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
-                        pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
-                    )
+                    if False:
+                        quantizer = pt2e_quantizer.PT2EQuantizer().set_global(
+                            pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
+                        )
+                    else:
+                        class PT2EQuantizer2(pt2e_quantizer.PT2EQuantizer):
+                            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                                super().annotate(model)
+                                for n in model.graph.nodes:
+                                    print(n.target, n.meta)
+                                    if n.target in [torch.ops.aten.add.Tensor, torch.ops.aten.mean.dim]:
+                                        if "quantization_annotation" in n.meta and ("s = s + self.eps" in n.meta["stack_trace"] or "u = x.mean(3, keepdim=True)" in n.meta["stack_trace"]):
+                                            print(n.target)
+                                            print("Before")
+                                            print(n.meta["quantization_annotation"])
+
+                                            from torch.ao.quantization.quantizer import QuantizationSpec
+                                            from torch.ao.quantization.observer import PlaceholderObserver
+                                            act_observer_or_fake_quant_ctr = PlaceholderObserver
+
+                                            float_spec = QuantizationSpec(dtype=torch.float32,
+                                                observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
+                                                eps=2**-12
+                                            ),)
+
+                                            for key in n.meta["quantization_annotation"].input_qspec_map:
+                                                n.meta["quantization_annotation"].input_qspec_map[key] = float_spec
+
+                                            n.meta["quantization_annotation"].output_qspec = float_spec
+
+                                            print("After")
+                                            print(n.meta["quantization_annotation"])
+                                return model
+
+                        quantizer = PT2EQuantizer2().set_global(
+                            pt2e_quantizer.get_symmetric_quantization_config(is_dynamic=False, is_per_channel=True)
+                        )
+
                     model = torch._export.capture_pre_autograd_graph(self.memory_encoder, sample_inputs)
                     model = quantize_pt2e.prepare_pt2e(model, quantizer)
 
@@ -1603,13 +1638,15 @@ class SAM2Base(torch.nn.Module):
                         model(data_0, data_1)
 
                     model = quantize_pt2e.convert_pt2e(model, fold_quantize=False)
-
+                    
                     with_quantizer = ai_edge_torch.convert(
                         model,
                         sample_inputs,
                         quant_config=quant_config.QuantConfig(pt2e_quantizer=quantizer),
                     )
                     with_quantizer.export("model/memory_encoder_"+model_id+".mixed.tflite")
+
+                    #exit()
                 else:
                     # tensorflow
                     import glob
