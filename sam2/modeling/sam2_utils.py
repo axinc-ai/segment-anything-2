@@ -159,7 +159,7 @@ class LayerNorm2dNHWC(nn.Module):
         self.bias = nn.Parameter(torch.zeros(num_channels))
         self.eps = eps
 
-    # for MINCUT
+    # for AIEDGETORCH_LAYOUT_OPTIMIZE_PARTITIONER=MINCUT
     def forward(self, x: torch.Tensor) -> torch.Tensor:
        # Turn into `NHWC` if required or any other specific format
        x = x.permute(0, 2, 3, 1)  # Optional based on requirements
