@@ -152,6 +152,26 @@ class LayerNorm2d(nn.Module):
         x = self.weight[:, None, None] * x + self.bias[:, None, None]
         return x
 
+class LayerNorm2dNHWC(nn.Module):
+    def __init__(self, num_channels: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(num_channels))
+        self.bias = nn.Parameter(torch.zeros(num_channels))
+        self.eps = eps
+
+    # for AIEDGETORCH_LAYOUT_OPTIMIZE_PARTITIONER=MINCUT
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+       # Turn into `NHWC` if required or any other specific format
+       x = x.permute(0, 2, 3, 1)  # Optional based on requirements
+       # Operations here depend on whether Channel is leading or at the end
+       u = x.mean(3, keepdim=True)
+       s = (x - u).pow(2).mean(3, keepdim=True)
+       s = s + self.eps
+       x = (x - u) / torch.sqrt(s)
+       x = self.weight * x + self.bias
+       # Revert back `NCHW`
+       x = x.permute(0, 3, 1, 2)  # If you converted earlier
+       return x
 
 def sample_box_points(
     masks: torch.Tensor,
